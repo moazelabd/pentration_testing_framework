@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recon Framework</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <div class="label">RECON FRAMEWORK</div>
+      <h1>Targets</h1>
+    </div>
+    <div id="target-list"></div>
+    <button id="add-target-btn">+ Add Target</button>
+  </div>
+
+  <div id="main">
+    <div id="main-inner"></div>
+  </div>
+
+  <div id="modal-overlay">
+    <div id="modal">
+      <h3>Add Target</h3>
+      <label>Target name</label>
+      <input id="input-name" type="text" placeholder="e.g. acme-corp" />
+      <label>URL / domain</label>
+      <input id="input-url" type="text" placeholder="e.g. example.com" />
+      <div id="modal-error"></div>
+      <div id="modal-actions">
+        <button class="ghost-btn" id="modal-cancel">Cancel</button>
+        <button class="run-btn" id="modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+<script src="app.js"></script>
+</body>
+</html>
