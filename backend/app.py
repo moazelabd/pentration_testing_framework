@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 
+import nmap
 import requests
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -25,6 +26,20 @@ TARGETS_DIR = os.path.join(BASE_DIR, "targets")
 FRONTEND_DIR = os.path.join(BASE_DIR, "..", "frontend")
 
 os.makedirs(TARGETS_DIR, exist_ok=True)
+
+# Small built-in wordlist for the endpoint/directory discovery module.
+# This is a quick-check list, not a full brute-force wordlist - it's meant
+# to flag commonly-exposed paths, not replace a dedicated tool like
+# gobuster/ffuf with a large wordlist.
+COMMON_PATHS = [
+    "robots.txt", "sitemap.xml", ".well-known/security.txt",
+    ".git/HEAD", ".git/config", ".env", ".env.local",
+    "admin", "administrator", "login", "wp-admin", "wp-login.php",
+    "api", "api/v1", "graphql", "swagger", "swagger-ui",
+    "backup", "backups", "config", "config.php", "config.json",
+    "uploads", "dashboard", "console", "server-status",
+    "test", "staging", "phpinfo.php", "readme.md", "changelog.md",
+]
 
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
 
@@ -201,6 +216,134 @@ def run_subdomain_enum(target_id):
         f.write("\n".join(subs))
 
     return jsonify({"subdomains": subs, "count": len(subs)})
+
+
+@app.route("/api/targets/<target_id>/portscan", methods=["GET"])
+def get_portscan(target_id):
+    target_path = safe_target_path(target_id)
+    if not target_path or not os.path.isdir(target_path):
+        return jsonify({"error": "not found"}), 404
+    result_path = os.path.join(target_path, "ports.txt")
+    lines = []
+    ran = os.path.isfile(result_path)
+    if ran:
+        with open(result_path, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+    return jsonify({"ports": lines, "ran": ran})
+
+
+@app.route("/api/targets/<target_id>/portscan", methods=["POST"])
+def run_portscan(target_id):
+    """
+    Active port scan via nmap (fast scan of the top 100 ports, TCP connect
+    scan - no elevated privileges required). This DOES send traffic to the
+    target, so only run it against in-scope, authorized targets.
+    """
+    target_path = safe_target_path(target_id)
+    if not target_path or not os.path.isdir(target_path):
+        return jsonify({"error": "not found"}), 404
+
+    meta = read_meta(target_path)
+    domain = meta["domain"]
+
+    scanner = nmap.PortScanner()
+    try:
+        scanner.scan(domain, arguments="-T4 -F")
+    except nmap.PortScannerError:
+        return jsonify({
+            "error": "nmap isn't installed or isn't on your system PATH. "
+                     "Install it from nmap.org (Windows) or via your package "
+                     "manager (apt/brew), then try again."
+        }), 502
+    except Exception as e:
+        return jsonify({"error": f"nmap scan failed: {e}"}), 502
+
+    lines = []
+    if domain in scanner.all_hosts():
+        host_info = scanner[domain]
+        for proto in host_info.all_protocols():
+            port_dict = host_info[proto]
+            for port in sorted(port_dict.keys()):
+                info = port_dict[port]
+                state = info.get("state", "")
+                service = info.get("name", "")
+                lines.append(f"{port}/{proto}  {state}  {service}".strip())
+    else:
+        # nmap ran but couldn't resolve/reach the host at all
+        return jsonify({
+            "error": f"nmap could not resolve or reach '{domain}'. "
+                     f"Double-check the domain is correct and reachable."
+        }), 502
+
+    result_path = os.path.join(target_path, "ports.txt")
+    with open(result_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    return jsonify({"ports": lines, "count": len(lines)})
+
+
+@app.route("/api/targets/<target_id>/endpoints", methods=["GET"])
+def get_endpoints(target_id):
+    target_path = safe_target_path(target_id)
+    if not target_path or not os.path.isdir(target_path):
+        return jsonify({"error": "not found"}), 404
+    result_path = os.path.join(target_path, "endpoints.txt")
+    lines = []
+    ran = os.path.isfile(result_path)
+    if ran:
+        with open(result_path, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+    return jsonify({"endpoints": lines, "ran": ran})
+
+
+@app.route("/api/targets/<target_id>/endpoints", methods=["POST"])
+def run_endpoint_discovery(target_id):
+    """
+    Active endpoint/directory discovery: checks a small built-in list of
+    commonly-exposed paths against the target over HTTP(S). This DOES send
+    requests directly to the target - authorized targets only.
+    """
+    target_path = safe_target_path(target_id)
+    if not target_path or not os.path.isdir(target_path):
+        return jsonify({"error": "not found"}), 404
+
+    meta = read_meta(target_path)
+    domain = meta["domain"]
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "recon-framework/1.0"})
+
+    working_base = None
+    for scheme in ("https", "http"):
+        base = f"{scheme}://{domain}"
+        try:
+            session.get(base, timeout=8, allow_redirects=True)
+            working_base = base
+            break
+        except requests.exceptions.RequestException:
+            continue
+
+    if not working_base:
+        return jsonify({
+            "error": f"Could not reach '{domain}' over HTTPS or HTTP. "
+                     f"Check the domain is correct and currently online."
+        }), 502
+
+    found = []
+    for path in COMMON_PATHS:
+        url = f"{working_base}/{path}"
+        try:
+            r = session.get(url, timeout=8, allow_redirects=False)
+            if r.status_code in (200, 204, 301, 302, 401, 403):
+                found.append(f"{r.status_code}  {url}")
+        except requests.exceptions.RequestException:
+            continue
+
+    result_path = os.path.join(target_path, "endpoints.txt")
+    with open(result_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(found))
+
+    return jsonify({"endpoints": found, "count": len(found), "base": working_base})
 
 
 if __name__ == "__main__":
