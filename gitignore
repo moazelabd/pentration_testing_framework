@@ -1,0 +1,27 @@
+# --- Recon data: this is per-user scan scope/results, never commit it ---
+backend/targets/*
+!backend/targets/.gitkeep
+
+# --- Secrets / local config ---
+.env
+.env.*
+*.key
+*.pem
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# --- Editor / OS junk ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log

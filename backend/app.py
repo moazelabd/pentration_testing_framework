@@ -248,19 +248,32 @@ def run_portscan(target_id):
 
     scanner = nmap.PortScanner()
     try:
-        scanner.scan(domain, arguments="-T4 -F")
-    except nmap.PortScannerError:
+        # -Pn skips nmap's host-discovery ping. Without it, a target that
+        # blocks ICMP (very common) gets reported as "down" even though its
+        # TCP ports are reachable - that looked like a random first-run
+        # failure but was actually every scan against a no-ping host.
+        scanner.scan(domain, arguments="-T4 -F -Pn")
+    except nmap.PortScannerError as e:
         return jsonify({
-            "error": "nmap isn't installed or isn't on your system PATH. "
-                     "Install it from nmap.org (Windows) or via your package "
-                     "manager (apt/brew), then try again."
+            "error": "nmap isn't installed, isn't on your system PATH, or the scan command "
+                     "itself failed. Install it from nmap.org (Windows) or via your package "
+                     f"manager (apt/brew), then try again. Details: {e}"
         }), 502
     except Exception as e:
-        return jsonify({"error": f"nmap scan failed: {e}"}), 502
+        # Surface the real exception type too - "first click fails" bugs are
+        # often a transient network/permission error (e.g. a firewall or
+        # antivirus prompt blocking the app's first outbound connection)
+        # rather than a missing-nmap problem, and the type narrows it down.
+        return jsonify({"error": f"nmap scan failed ({type(e).__name__}): {e}"}), 502
 
     lines = []
-    if domain in scanner.all_hosts():
-        host_info = scanner[domain]
+    scanned_hosts = scanner.all_hosts()
+    # nmap/python-nmap keys results by the resolved IP address, not the
+    # hostname you passed in - so a scan of "www.arc.io" shows up under
+    # e.g. "198.202.211.1". Checking "domain in scanned_hosts" was the real
+    # bug behind "could not resolve or reach" even on a successful scan.
+    if scanned_hosts:
+        host_info = scanner[scanned_hosts[0]]
         for proto in host_info.all_protocols():
             port_dict = host_info[proto]
             for port in sorted(port_dict.keys()):
