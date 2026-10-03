@@ -7,13 +7,19 @@ let activeId = null;
 // (e.g. after running a tool) instead of resetting every time.
 let uiState = {
   sections: { recon: false },
-  tools: { subdomains: false, portscan: false, endpoints: false }
+  tools: {
+    subdomains: false, portscan: false, endpoints: false,
+    dns: false, whois: false, techinfo: false, wayback: false
+  }
 };
 
 function resetUiState() {
   uiState = {
     sections: { recon: false },
-    tools: { subdomains: false, portscan: false, endpoints: false }
+    tools: {
+      subdomains: false, portscan: false, endpoints: false,
+      dns: false, whois: false, techinfo: false, wayback: false
+    }
   };
 }
 
@@ -156,15 +162,23 @@ async function renderMain() {
     return;
   }
 
-  const [subRes, portRes, endpRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
+    fetch(`${API}/${t.id}/dns`).then(r => r.json()),
+    fetch(`${API}/${t.id}/whois`).then(r => r.json()),
+    fetch(`${API}/${t.id}/techinfo`).then(r => r.json()),
+    fetch(`${API}/${t.id}/wayback`).then(r => r.json()),
   ]);
 
   const subs = subRes.subdomains || [];
   const ports = portRes.ports || [];
   const endpoints = endpRes.endpoints || [];
+  const dnsRecords = dnsRes.records || [];
+  const whoisLines = whoisRes.whois || [];
+  const techLines = techRes.techinfo || [];
+  const waybackUrls = waybackRes.urls || [];
 
   const reconOpen = uiState.sections.recon;
 
@@ -210,6 +224,42 @@ async function renderMain() {
           items: endpoints
         })}
 
+        ${toolCardHTML({
+          key: 'dns',
+          title: 'DNS Records',
+          description: 'Looks up A/AAAA/MX/NS/TXT/CNAME/SOA records and tries a zone transfer (AXFR). Mostly passive - the AXFR attempt talks directly to the target\u2019s nameservers.',
+          note: `Saved to targets/${t.id}/dns_records.txt`,
+          statusText: statusFor(dnsRes.ran, dnsRecords.length, 'records found'),
+          items: dnsRecords
+        })}
+
+        ${toolCardHTML({
+          key: 'whois',
+          title: 'WHOIS / RDAP Lookup',
+          description: 'Registrar, registration/expiry dates, and nameservers via the public RDAP bootstrap service. Fully passive - no traffic sent to the target.',
+          note: `Saved to targets/${t.id}/whois.txt`,
+          statusText: statusFor(whoisRes.ran, whoisLines.length, 'fields found'),
+          items: whoisLines
+        })}
+
+        ${toolCardHTML({
+          key: 'techinfo',
+          title: 'Tech Fingerprint + TLS',
+          description: 'Reads server headers, a generator meta tag if present, and the TLS certificate (issuer, expiry, SANs). Active - one lightweight request + TLS handshake.',
+          note: `Saved to targets/${t.id}/techinfo.txt`,
+          statusText: statusFor(techRes.ran, techLines.length, 'fields found'),
+          items: techLines
+        })}
+
+        ${toolCardHTML({
+          key: 'wayback',
+          title: 'Wayback Machine URLs',
+          description: 'Pulls historical URLs for this domain from archive.org - often surfaces old endpoints no longer linked anywhere. Fully passive.',
+          note: `Saved to targets/${t.id}/wayback.txt`,
+          statusText: statusFor(waybackRes.ran, waybackUrls.length, 'URLs found'),
+          items: waybackUrls
+        })}
+
       </div>
     </div>
   `;
@@ -223,6 +273,10 @@ async function renderMain() {
   wireToolCard('subdomains', subs, () => runTool({ key: 'subdomains', endpoint: 'subdomains', t }));
   wireToolCard('portscan', ports, () => runTool({ key: 'portscan', endpoint: 'portscan', t }));
   wireToolCard('endpoints', endpoints, () => runTool({ key: 'endpoints', endpoint: 'endpoints', t }));
+  wireToolCard('dns', dnsRecords, () => runTool({ key: 'dns', endpoint: 'dns', t }));
+  wireToolCard('whois', whoisLines, () => runTool({ key: 'whois', endpoint: 'whois', t }));
+  wireToolCard('techinfo', techLines, () => runTool({ key: 'techinfo', endpoint: 'techinfo', t }));
+  wireToolCard('wayback', waybackUrls, () => runTool({ key: 'wayback', endpoint: 'wayback', t }));
 }
 
 // Modal
