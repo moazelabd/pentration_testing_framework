@@ -15,7 +15,7 @@ Then open http://localhost:5000 in your browser.
 from flask import Flask, jsonify, request, send_from_directory
 
 import storage
-from modules.recon import endpoints, portscan, subdomains
+from modules.recon import dns_records, endpoints, portscan, subdomains, tech_fingerprint, wayback_urls, whois_lookup
 
 app = Flask(__name__, static_folder=storage.FRONTEND_DIR, static_url_path="")
 
@@ -128,6 +128,82 @@ def run_endpoint_discovery_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(endpoints.run(domain, target_path))
+
+
+# ---------- recon: DNS records ----------
+
+@app.route("/api/targets/<target_id>/dns", methods=["GET"])
+def get_dns_records(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(dns_records.get_cached(target_path))
+
+
+@app.route("/api/targets/<target_id>/dns", methods=["POST"])
+def run_dns_records_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(dns_records.run(domain, target_path))
+
+
+# ---------- recon: WHOIS / RDAP ----------
+
+@app.route("/api/targets/<target_id>/whois", methods=["GET"])
+def get_whois(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(whois_lookup.get_cached(target_path))
+
+
+@app.route("/api/targets/<target_id>/whois", methods=["POST"])
+def run_whois_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(whois_lookup.run(domain, target_path))
+
+
+# ---------- recon: tech fingerprint + TLS ----------
+
+@app.route("/api/targets/<target_id>/techinfo", methods=["GET"])
+def get_techinfo(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(tech_fingerprint.get_cached(target_path))
+
+
+@app.route("/api/targets/<target_id>/techinfo", methods=["POST"])
+def run_techinfo_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(tech_fingerprint.run(domain, target_path))
+
+
+# ---------- recon: Wayback Machine URLs ----------
+
+@app.route("/api/targets/<target_id>/wayback", methods=["GET"])
+def get_wayback(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(wayback_urls.get_cached(target_path))
+
+
+@app.route("/api/targets/<target_id>/wayback", methods=["POST"])
+def run_wayback_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(wayback_urls.run(domain, target_path))
 
 
 if __name__ == "__main__":
