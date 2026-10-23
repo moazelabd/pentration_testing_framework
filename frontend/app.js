@@ -199,8 +199,8 @@ async function renderMain() {
 
         ${toolCardHTML({
           key: 'subdomains',
-          title: 'Subdomain Enumeration',
-          description: 'Pulls subdomains from public SSL certificate logs (crt.sh) - fully passive, no traffic sent to the target.',
+          title: 'Subdomain Enumeration (all-in-one)',
+          description: 'Merges crt.sh, CertSpotter and HackerTarget, de-duplicated - each result is tagged with which source(s) found it. Fully passive, no traffic sent to the target.',
           note: `Saved to targets/${t.id}/subdomains.txt`,
           statusText: statusFor(subRes.ran, subs.length, 'subdomains'),
           items: subs
@@ -218,7 +218,7 @@ async function renderMain() {
         ${toolCardHTML({
           key: 'endpoints',
           title: 'Directory / Endpoint Discovery',
-          description: 'Checks a built-in list of commonly-exposed paths (admin panels, .git, config files, etc). Active - sends requests to the target.',
+          description: 'Checks a built-in path list PLUS real historical paths pulled from the Wayback Machine results (run that tool first for better coverage). Active - sends requests to the target.',
           note: `Saved to targets/${t.id}/endpoints.txt`,
           statusText: statusFor(endpRes.ran, endpoints.length, 'endpoints found'),
           items: endpoints

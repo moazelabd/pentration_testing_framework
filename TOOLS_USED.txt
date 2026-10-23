@@ -1,0 +1,59 @@
+Recon Framework - Tools / APIs Used Per Module
+================================================
+
+1) Subdomain Enumeration (all-in-one)
+   File: backend/modules/recon/subdomains_all_in_one.py
+   Type: PASSIVE
+   Sources merged:
+     - crt.sh            https://crt.sh                              (certificate transparency logs)
+     - CertSpotter        https://api.certspotter.com                 (certificate transparency logs, free tier)
+     - HackerTarget        https://api.hackertarget.com/hostsearch/    (passive DNS / hostsearch, free tier ~50-100 req/day/IP)
+
+2) Port Scan
+   File: backend/modules/recon/portscan.py
+   Type: ACTIVE (sends traffic to the target)
+   Tool used:
+     - nmap (local binary, called via the python-nmap library)
+
+3) Directory / Endpoint Discovery
+   File: backend/modules/recon/endpoints.py
+   Type: ACTIVE (sends requests to the target)
+   Sources merged:
+     - Built-in static wordlist (hand-picked common paths: admin panels, .git, .env, config files, etc.)
+     - Wayback Machine results (reuses wayback.txt from module 7 below, if already run)
+   Library: requests (direct HTTP/HTTPS calls to the target)
+
+4) DNS Records Enumeration
+   File: backend/modules/recon/dns_records.py
+   Type: MOSTLY PASSIVE (zone-transfer attempt is active - goes to the target's own nameservers)
+   Library: dnspython
+   Queries: A, AAAA, MX, NS, TXT, CNAME, SOA records + AXFR (zone transfer) attempt
+
+5) WHOIS / RDAP Lookup
+   File: backend/modules/recon/whois_lookup.py
+   Type: PASSIVE
+   Source:
+     - RDAP bootstrap service   https://rdap.org   (redirects to the correct registry's RDAP server)
+
+6) Tech Fingerprint + TLS Info
+   File: backend/modules/recon/tech_fingerprint.py
+   Type: ACTIVE (one HTTP(S) request + one TLS handshake to the target)
+   Libraries: requests (HTTP headers + generator meta tag), ssl/socket (TLS certificate details)
+
+7) Wayback Machine URL Discovery
+   File: backend/modules/recon/wayback_urls.py
+   Type: PASSIVE
+   Source:
+     - Internet Archive CDX API   http://web.archive.org/cdx/search/cdx
+
+----------------------------------------------------------------------
+Core backend stack (not recon-specific):
+   - Flask        (web framework / API routes)
+   - requests     (HTTP client, used by most modules above)
+   - python-nmap  (Python wrapper around the nmap binary)
+   - dnspython    (DNS queries for module 4)
+
+All of the above are free and require no API key. HackerTarget and
+CertSpotter have free-tier rate limits (shared per public IP); if either
+is temporarily exhausted, the subdomain module still returns results from
+whichever sources succeeded, with a note about which one was skipped.
