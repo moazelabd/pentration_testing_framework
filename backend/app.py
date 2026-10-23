@@ -15,7 +15,7 @@ Then open http://localhost:5000 in your browser.
 from flask import Flask, jsonify, request, send_from_directory
 
 import storage
-from modules.recon import dns_records, endpoints, portscan, subdomains, tech_fingerprint, wayback_urls, whois_lookup
+from modules.recon import dns_records, endpoints, portscan, subdomains_all_in_one as subdomains, tech_fingerprint, wayback_urls, whois_lookup
 
 app = Flask(__name__, static_folder=storage.FRONTEND_DIR, static_url_path="")
 
