@@ -9,24 +9,33 @@ containing text files with each tool's results.
 ## Structure
 
 ```
-recon-framework/
+capstone_prj/
 ├── backend/
-│   ├── app.py            # Flask server + all API endpoints
+│   ├── app.py                    # Flask server - routes only
+│   ├── storage.py                 # target folders / meta.json helpers
 │   ├── requirements.txt
-│   └── targets/          # a folder per target is created automatically
+│   ├── modules/
+│   │   ├── recon/                 # one file per recon tool (see below)
+│   │   └── vuln_scan/             # next phase - scaffolded, not implemented yet
+│   └── targets/                   # a folder per target, created automatically
 │       └── <target-id>/
 │           ├── meta.json
-│           └── subdomains.txt
+│           └── *.txt              # one result file per tool that's been run
 └── frontend/
-    ├── index.html
+    ├── index.html                 # landing page + app shell + monitoring placeholder
     ├── style.css
     └── app.js
 ```
 
+See `TOOLS_USED.txt` for a quick reference of every external tool/API each
+module uses.
+
 ## Running it
 
 ```bash
-cd recon-framework/backend
+cd capstone_prj/backend
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 python app.py
 ```
@@ -40,57 +49,131 @@ http://localhost:5000
 On Windows, if `python`/`pip` aren't recognized, try `py` and
 `py -m pip install -r requirements.txt` instead.
 
+You'll land on a start screen with two options:
+- **Framework** - the recon tool (everything below).
+- **Monitoring** - placeholder for a later phase, not built yet.
+
 ## Available tools
 
-- **Subdomain Enumeration** *(passive)*: pulls subdomains from **crt.sh**
-  (public SSL certificate transparency logs). No traffic is ever sent to
-  the target itself.
+Recon tools live under `backend/modules/recon/`, one file per tool. Several
+of them build on each other's output - **run them in this order** for best
+results (the UI disables a tool's Run button with a tooltip until its
+prerequisite has been run):
 
-  Note: crt.sh is a public, sometimes-overloaded server. If a run seems to
-  hang for a while and then fails, it usually means crt.sh was slow to
-  respond (the backend times out after 60s) - just try again in a bit.
+```
+Wayback Machine URLs  ->  URL Pattern Filter  ->  XSS Reflection Prober
+                      \-> Directory / Endpoint Discovery (merges in wayback paths)
+```
 
-- **Port Scan** *(active - requires nmap)*: a fast scan of the top 100 TCP
-  ports via nmap. This sends real traffic to the target, so only run it
-  against in-scope, authorized targets.
+Everything else (Subdomains, Port Scan, DNS, WHOIS, Tech Fingerprint) can be
+run independently, in any order.
+
+- **Subdomain Enumeration (all-in-one)** *(passive)* - `subdomains_all_in_one.py`
+  Merges 3 free, no-API-key sources and de-duplicates: **crt.sh**,
+  **CertSpotter** (certificate transparency, different coverage than crt.sh),
+  and **HackerTarget** (passive DNS, not cert-based). Each result is tagged
+  with which source(s) found it. No traffic is ever sent to the target.
+
+- **Port Scan** *(active - requires nmap)* - `portscan.py`
+  Fast scan of the top 100 TCP ports via nmap (`-T4 -F -Pn`). Sends real
+  traffic to the target.
 
   **nmap must be installed separately** - it's a system tool, not a Python
   package:
-  - Windows: download the installer from [nmap.org/download](https://nmap.org/download.html)
+  - Windows: [nmap.org/download](https://nmap.org/download.html)
   - macOS: `brew install nmap`
-  - Linux: `sudo apt install nmap` (or your distro's equivalent)
+  - Linux: `sudo apt install nmap`
 
   Verify it's on your PATH with `nmap --version` before running the scan.
 
-- **Directory / Endpoint Discovery** *(active)*: checks a small built-in
-  list of commonly-exposed paths (`.git/HEAD`, `.env`, `/admin`,
-  `/wp-admin`, etc.) over HTTP/HTTPS. This is a quick-check list, not a
-  full wordlist brute-force like gobuster/ffuf - it sends real requests to
-  the target, so authorized targets only.
+- **Directory / Endpoint Discovery** *(active)* - `endpoints.py`
+  Checks a built-in list of commonly-exposed paths (`.git/HEAD`, `.env`,
+  `/admin`, etc.) **plus** real historical paths pulled from this target's
+  own `wayback.txt`, if Wayback has already been run. Sends real requests
+  to the target.
 
-Results are saved automatically under `backend/targets/<target-id>/`:
-`subdomains.txt`, `ports.txt`, `endpoints.txt`.
+- **DNS Records** *(mostly passive)* - `dns_records.py`
+  A/AAAA/MX/NS/TXT/CNAME/SOA lookups, plus a zone-transfer (AXFR) attempt
+  against each nameserver - the AXFR attempt is the one active part (it
+  talks directly to the target's own nameservers). A server that allows it
+  is a real misconfiguration finding.
+
+- **WHOIS / RDAP Lookup** *(passive)* - `whois_lookup.py`
+  Registrar, registration/expiry dates, nameservers, via the public RDAP
+  bootstrap service (`rdap.org`). No traffic sent to the target.
+
+- **Tech Fingerprint + TLS Info** *(active)* - `tech_fingerprint.py`
+  One lightweight request + one TLS handshake: server headers, a generator
+  meta tag if present, and TLS certificate details (issuer, expiry, SANs).
+
+- **Wayback Machine URLs** *(passive)* - `wayback_urls.py`
+  Historical URLs for the domain from archive.org's CDX API - often
+  surfaces old endpoints no longer linked anywhere. Feeds into both
+  Endpoint Discovery and URL Pattern Filter below.
+
+- **URL Pattern Filter (gf-patterns-inspired)** *(passive, zero network calls)* - `url_pattern_filter.py`
+  Sorts the URLs from `wayback.txt` into categories (`xss`, `redirect`,
+  `ssrf`, `sqli`, `lfi`, `rce`, `idor`, `debug_logic`, `interesting_ext`)
+  based on query-param names and file extensions - inspired by
+  [Gf-Patterns](https://github.com/1ndianl33t/Gf-Patterns), implemented
+  directly in Python. **Requires Wayback Machine URLs to have been run
+  first.**
+
+- **XSS Reflection Prober (dalfox-inspired)** *(active)* - `xss_prober.py`
+  Takes the URLs tagged `xss` by URL Pattern Filter and injects a marker
+  with HTML-significant characters (`'"><`) into each query param, then
+  checks whether it reflects back **unescaped**. This is a signal, not
+  proof, of reflected XSS - no `<script>` payload is injected or executed;
+  verify manually before treating it as a confirmed finding. **Requires
+  URL Pattern Filter to have been run first.**
+
+Results are saved automatically under `backend/targets/<target-id>/` as one
+`.txt` file per tool (`subdomains.txt`, `ports.txt`, `endpoints.txt`,
+`dns_records.txt`, `whois.txt`, `techinfo.txt`, `wayback.txt`,
+`url_patterns.txt`, `xss_probe.txt`).
+
+## What's next (not built yet)
+
+`backend/modules/vuln_scan/` is scaffolded for the next phase:
+- `nse_vuln_scripts.py` - `nmap --script vuln` against open ports
+- `tls_checks.py` - weak/expired certs, outdated ciphers
+- `web_misconfig.py` - missing security headers, directory listing, etc.
+- `cve_lookup.py` - match fingerprinted versions to known CVEs
+
+The frontend's **Monitoring** button also currently opens an empty
+placeholder page - not implemented yet.
 
 ## Adding a new tool later
 
 Every new recon tool needs:
-1. **An endpoint in `app.py`** - like `run_subdomain_enum` - that takes the
-   target, fetches the result, and writes it to a txt file inside the
-   target's folder.
-2. **A card in the frontend** - call `toolCardHTML({...})` and
+1. **A module in `backend/modules/recon/`** with `get_cached(target_path)`
+   and `run(domain, target_path)` functions, following the pattern used by
+   the existing modules. `run()` returns either a success dict, or
+   `{"error": str, "status": int}` on failure.
+2. **Two routes in `app.py`** (GET for cached results, POST to run it) -
+   copy an existing pair like `get_dns_records` / `run_dns_records_route`.
+3. **A card in the frontend** - call `toolCardHTML({...})` and
    `wireToolCard(...)` in `app.js` with a new `key`, following the pattern
-   used for `subdomains` / `portscan` / `endpoints`.
+   used by the other tools. Add the key to `uiState.tools` in both places
+   it's defined at the top of the file.
 
 ## API Reference
 
-| Method | Endpoint                          | Purpose                              |
-|--------|------------------------------------|----------------------------------------|
-| GET    | `/api/targets`                     | List all targets                       |
-| POST   | `/api/targets`                     | Add a new target `{name, domain}`      |
-| DELETE | `/api/targets/<id>`                | Delete a target and its whole folder   |
-| GET    | `/api/targets/<id>/subdomains`     | Get the last saved subdomain results   |
-| POST   | `/api/targets/<id>/subdomains`     | Run subdomain enumeration              |
-| GET    | `/api/targets/<id>/portscan`       | Get the last saved port scan results   |
-| POST   | `/api/targets/<id>/portscan`       | Run an nmap port scan                  |
-| GET    | `/api/targets/<id>/endpoints`      | Get the last saved endpoint results    |
-| POST   | `/api/targets/<id>/endpoints`      | Run endpoint/directory discovery       |
+| Method   | Endpoint                         | Purpose                            |
+|----------|-----------------------------------|-------------------------------------|
+| GET      | `/api/targets`                    | List all targets                   |
+| POST     | `/api/targets`                    | Add a new target `{name, domain}`  |
+| DELETE   | `/api/targets/<id>`               | Delete a target and its whole folder |
+| GET/POST | `/api/targets/<id>/subdomains`    | Subdomain Enumeration (all-in-one) |
+| GET/POST | `/api/targets/<id>/portscan`      | Port Scan (nmap)                   |
+| GET/POST | `/api/targets/<id>/endpoints`     | Directory / Endpoint Discovery     |
+| GET/POST | `/api/targets/<id>/dns`           | DNS Records                        |
+| GET/POST | `/api/targets/<id>/whois`         | WHOIS / RDAP Lookup                |
+| GET/POST | `/api/targets/<id>/techinfo`      | Tech Fingerprint + TLS Info        |
+| GET/POST | `/api/targets/<id>/wayback`       | Wayback Machine URLs               |
+| GET/POST | `/api/targets/<id>/urlpatterns`   | URL Pattern Filter                 |
+| GET/POST | `/api/targets/<id>/xssprobe`      | XSS Reflection Prober              |
+
+GET returns the last saved result (or `{"ran": false}` if the tool hasn't
+been run yet for that target). POST runs the tool fresh and overwrites the
+saved result.
