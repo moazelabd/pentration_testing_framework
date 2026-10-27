@@ -9,7 +9,7 @@ let uiState = {
   sections: { recon: false },
   tools: {
     subdomains: false, portscan: false, endpoints: false,
-    dns: false, whois: false, techinfo: false, wayback: false
+    dns: false, whois: false, techinfo: false, wayback: false, urlpatterns: false, xssprobe: false
   }
 };
 
@@ -18,7 +18,7 @@ function resetUiState() {
     sections: { recon: false },
     tools: {
       subdomains: false, portscan: false, endpoints: false,
-      dns: false, whois: false, techinfo: false, wayback: false
+      dns: false, whois: false, techinfo: false, wayback: false, urlpatterns: false, xssprobe: false
     }
   };
 }
@@ -162,7 +162,7 @@ async function renderMain() {
     return;
   }
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, urlPatRes, xssRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -170,6 +170,8 @@ async function renderMain() {
     fetch(`${API}/${t.id}/whois`).then(r => r.json()),
     fetch(`${API}/${t.id}/techinfo`).then(r => r.json()),
     fetch(`${API}/${t.id}/wayback`).then(r => r.json()),
+    fetch(`${API}/${t.id}/urlpatterns`).then(r => r.json()),
+    fetch(`${API}/${t.id}/xssprobe`).then(r => r.json()),
   ]);
 
   const subs = subRes.subdomains || [];
@@ -179,6 +181,8 @@ async function renderMain() {
   const whoisLines = whoisRes.whois || [];
   const techLines = techRes.techinfo || [];
   const waybackUrls = waybackRes.urls || [];
+  const urlPatterns = urlPatRes.matches || [];
+  const xssFindings = xssRes.findings || [];
 
   const reconOpen = uiState.sections.recon;
 
@@ -260,6 +264,24 @@ async function renderMain() {
           items: waybackUrls
         })}
 
+        ${toolCardHTML({
+          key: 'urlpatterns',
+          title: 'URL Pattern Filter (gf-patterns)',
+          description: 'Sorts Wayback URLs into categories (xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext) by param name / extension. Passive, zero traffic - run Wayback Machine first.',
+          note: `Saved to targets/${t.id}/url_patterns.txt`,
+          statusText: statusFor(urlPatRes.ran, urlPatterns.length, 'matches found'),
+          items: urlPatterns
+        })}
+
+        ${toolCardHTML({
+          key: 'xssprobe',
+          title: 'XSS Reflection Prober (dalfox-inspired)',
+          description: 'Injects a marker into each param of the "xss"-tagged URLs and checks if it reflects unescaped - a signal, not proof, of reflected XSS. Active - run URL Pattern Filter first.',
+          note: `Saved to targets/${t.id}/xss_probe.txt`,
+          statusText: statusFor(xssRes.ran, xssFindings.length, 'findings'),
+          items: xssFindings
+        })}
+
       </div>
     </div>
   `;
@@ -277,6 +299,8 @@ async function renderMain() {
   wireToolCard('whois', whoisLines, () => runTool({ key: 'whois', endpoint: 'whois', t }));
   wireToolCard('techinfo', techLines, () => runTool({ key: 'techinfo', endpoint: 'techinfo', t }));
   wireToolCard('wayback', waybackUrls, () => runTool({ key: 'wayback', endpoint: 'wayback', t }));
+  wireToolCard('urlpatterns', urlPatterns, () => runTool({ key: 'urlpatterns', endpoint: 'urlpatterns', t }));
+  wireToolCard('xssprobe', xssFindings, () => runTool({ key: 'xssprobe', endpoint: 'xssprobe', t }));
 }
 
 // Modal
