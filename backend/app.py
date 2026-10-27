@@ -15,7 +15,10 @@ Then open http://localhost:5000 in your browser.
 from flask import Flask, jsonify, request, send_from_directory
 
 import storage
-from modules.recon import dns_records, endpoints, portscan, subdomains_all_in_one as subdomains, tech_fingerprint, wayback_urls, whois_lookup
+from modules.recon import (
+    dns_records, endpoints, portscan, subdomains_all_in_one as subdomains,
+    tech_fingerprint, url_pattern_filter, wayback_urls, whois_lookup, xss_prober,
+)
 
 app = Flask(__name__, static_folder=storage.FRONTEND_DIR, static_url_path="")
 
@@ -204,6 +207,44 @@ def run_wayback_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(wayback_urls.run(domain, target_path))
+
+
+# ---------- recon: URL pattern filter (gf-patterns-inspired) ----------
+
+@app.route("/api/targets/<target_id>/urlpatterns", methods=["GET"])
+def get_urlpatterns(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(url_pattern_filter.get_cached(target_path))
+
+
+@app.route("/api/targets/<target_id>/urlpatterns", methods=["POST"])
+def run_urlpatterns_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(url_pattern_filter.run(domain, target_path))
+
+
+# ---------- recon: XSS reflection prober (dalfox-inspired) ----------
+
+@app.route("/api/targets/<target_id>/xssprobe", methods=["GET"])
+def get_xssprobe(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(xss_prober.get_cached(target_path))
+
+
+@app.route("/api/targets/<target_id>/xssprobe", methods=["POST"])
+def run_xssprobe_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(xss_prober.run(domain, target_path))
 
 
 if __name__ == "__main__":

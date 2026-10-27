@@ -46,6 +46,23 @@ Recon Framework - Tools / APIs Used Per Module
    Source:
      - Internet Archive CDX API   http://web.archive.org/cdx/search/cdx
 
+8) URL Pattern Filter (gf-patterns-inspired)
+   File: backend/modules/recon/url_pattern_filter.py
+   Type: PASSIVE, zero network calls (re-reads wayback.txt from module 7)
+   Inspired by: Gf-Patterns  https://github.com/1ndianl33t/Gf-Patterns
+   Categories: xss, redirect, ssrf, sqli, lfi, rce, idor, debug_logic, interesting_ext
+   Note: implemented directly in Python (param-name/extension matching), not a
+   call-out to the real `gf` CLI tool.
+
+9) XSS Reflection Prober (dalfox-inspired)
+   File: backend/modules/recon/xss_prober.py
+   Type: ACTIVE (sends crafted requests to the target)
+   Inspired by: dalfox / kxss reflection-detection technique
+   Reads: url_patterns.txt (module 8) for URLs tagged "xss"
+   Method: injects a marker with HTML-significant characters into each query
+   param, flags it if the marker reflects back UNESCAPED (signal, not proof,
+   of reflected XSS - no <script> payload is injected or executed).
+
 ----------------------------------------------------------------------
 Core backend stack (not recon-specific):
    - Flask        (web framework / API routes)
