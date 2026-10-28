@@ -61,13 +61,32 @@ results (the UI disables a tool's Run button with a tooltip until its
 prerequisite has been run):
 
 ```
+<<<<<<< HEAD
 Wayback Machine URLs  ->  URL Pattern Filter  ->  XSS Reflection Prober
                       \-> Directory / Endpoint Discovery (merges in wayback paths)
+=======
+Wayback Machine URLs -> URL Cleaner (uro) -> URL Pattern Filter -> XSS Reflection Prober
+                     \-> Directory / Endpoint Discovery (merges in wayback paths)
+>>>>>>> 2aa2b0a (Add URL filtering and UI improvements; fix Nmap crash)
 ```
 
 Everything else (Subdomains, Port Scan, DNS, WHOIS, Tech Fingerprint) can be
 run independently, in any order.
 
+<<<<<<< HEAD
+=======
+The **Run All** button (top-right of the Recon section) runs every tool in
+this dependency-safe order automatically, one at a time, and keeps going
+even if an individual tool fails (nmap missing, target unreachable, etc.) -
+check the status line under the button for anything it had to skip.
+
+Tools are grouped in the UI into three sections: **Discovery** (Subdomains,
+Port Scan, DNS, WHOIS), **Content & URL Analysis** (Endpoint Discovery,
+Wayback, URL Cleaner, URL Pattern Filter), and **Active Testing** (Tech
+Fingerprint, XSS Prober). A stats bar at the top of each target shows a
+quick count from every tool's last run.
+
+>>>>>>> 2aa2b0a (Add URL filtering and UI improvements; fix Nmap crash)
 - **Subdomain Enumeration (all-in-one)** *(passive)* - `subdomains_all_in_one.py`
   Merges 3 free, no-API-key sources and de-duplicates: **crt.sh**,
   **CertSpotter** (certificate transparency, different coverage than crt.sh),
@@ -111,6 +130,7 @@ run independently, in any order.
   surfaces old endpoints no longer linked anywhere. Feeds into both
   Endpoint Discovery and URL Pattern Filter below.
 
+<<<<<<< HEAD
 - **URL Pattern Filter (gf-patterns-inspired)** *(passive, zero network calls)* - `url_pattern_filter.py`
   Sorts the URLs from `wayback.txt` into categories (`xss`, `redirect`,
   `ssrf`, `sqli`, `lfi`, `rce`, `idor`, `debug_logic`, `interesting_ext`)
@@ -118,6 +138,23 @@ run independently, in any order.
   [Gf-Patterns](https://github.com/1ndianl33t/Gf-Patterns), implemented
   directly in Python. **Requires Wayback Machine URLs to have been run
   first.**
+=======
+- **URL Cleaner (uro-inspired)** *(passive, zero network calls)* - `uro_filter.py`
+  Drops boring static-asset URLs (images, fonts, css, js, media) and
+  collapses near-duplicate URLs - same path pattern and same query-param
+  names, just a different ID or value - from `wayback.txt`. Inspired by
+  [uro](https://github.com/s0md3v/uro). **Requires Wayback Machine URLs to
+  have been run first.**
+
+- **URL Pattern Filter (gf-patterns-inspired)** *(passive, zero network calls)* - `url_pattern_filter.py`
+  Sorts URLs into categories (`xss`, `redirect`, `ssrf`, `sqli`, `lfi`,
+  `rce`, `idor`, `debug_logic`, `interesting_ext`) based on query-param
+  names and file extensions - inspired by
+  [Gf-Patterns](https://github.com/1ndianl33t/Gf-Patterns), implemented
+  directly in Python. Prefers URL Cleaner's output if available, falls
+  back to raw `wayback.txt` otherwise. **Requires Wayback Machine URLs to
+  have been run first.**
+>>>>>>> 2aa2b0a (Add URL filtering and UI improvements; fix Nmap crash)
 
 - **XSS Reflection Prober (dalfox-inspired)** *(active)* - `xss_prober.py`
   Takes the URLs tagged `xss` by URL Pattern Filter and injects a marker
@@ -130,7 +167,11 @@ run independently, in any order.
 Results are saved automatically under `backend/targets/<target-id>/` as one
 `.txt` file per tool (`subdomains.txt`, `ports.txt`, `endpoints.txt`,
 `dns_records.txt`, `whois.txt`, `techinfo.txt`, `wayback.txt`,
+<<<<<<< HEAD
 `url_patterns.txt`, `xss_probe.txt`).
+=======
+`uro_urls.txt`, `url_patterns.txt`, `xss_probe.txt`).
+>>>>>>> 2aa2b0a (Add URL filtering and UI improvements; fix Nmap crash)
 
 ## What's next (not built yet)
 
@@ -171,6 +212,10 @@ Every new recon tool needs:
 | GET/POST | `/api/targets/<id>/whois`         | WHOIS / RDAP Lookup                |
 | GET/POST | `/api/targets/<id>/techinfo`      | Tech Fingerprint + TLS Info        |
 | GET/POST | `/api/targets/<id>/wayback`       | Wayback Machine URLs               |
+<<<<<<< HEAD
+=======
+| GET/POST | `/api/targets/<id>/uro`           | URL Cleaner (uro)                  |
+>>>>>>> 2aa2b0a (Add URL filtering and UI improvements; fix Nmap crash)
 | GET/POST | `/api/targets/<id>/urlpatterns`   | URL Pattern Filter                 |
 | GET/POST | `/api/targets/<id>/xssprobe`      | XSS Reflection Prober              |
 

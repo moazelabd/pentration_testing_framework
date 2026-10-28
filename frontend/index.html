@@ -8,17 +8,47 @@
 </head>
 <body>
 
-  <div id="sidebar">
-    <div id="sidebar-header">
-      <div class="label">RECON FRAMEWORK</div>
-      <h1>Targets</h1>
+  <button id="theme-toggle-btn" class="theme-toggle-fixed" title="Toggle light/dark theme">&#9728; Light</button>
+
+  <div id="landing-page">
+    <div class="landing-inner">
+      <div class="landing-label">RECON FRAMEWORK</div>
+      <h1>Choose where to go</h1>
+      <div class="landing-buttons">
+        <button id="landing-framework-btn" class="landing-btn">
+          <span class="landing-btn-glyph">&gt;_</span>
+          <span class="landing-btn-title">Framework</span>
+          <span class="landing-btn-sub">Targets, recon tools, scans</span>
+        </button>
+        <button id="landing-monitoring-btn" class="landing-btn">
+          <span class="landing-btn-glyph">&#9679;</span>
+          <span class="landing-btn-title">Monitoring</span>
+          <span class="landing-btn-sub">Coming soon</span>
+        </button>
+      </div>
     </div>
-    <div id="target-list"></div>
-    <button id="add-target-btn">+ Add Target</button>
   </div>
 
-  <div id="main">
-    <div id="main-inner"></div>
+  <div id="app-shell">
+    <div id="sidebar">
+      <div id="sidebar-header">
+        <div class="label">RECON FRAMEWORK</div>
+        <h1>Targets</h1>
+        <button id="back-to-landing-from-app" class="back-link">&larr; Back</button>
+      </div>
+      <div id="target-list"></div>
+      <button id="add-target-btn">+ Add Target</button>
+    </div>
+
+    <div id="main">
+      <div id="main-inner"></div>
+    </div>
+  </div>
+
+  <div id="monitoring-page">
+    <button id="back-to-landing-from-monitoring" class="back-link monitoring-back">&larr; Back</button>
+    <div class="landing-label">MONITORING</div>
+    <p>This section isn't built yet - coming in a later phase.</p>
   </div>
 
   <div id="modal-overlay">

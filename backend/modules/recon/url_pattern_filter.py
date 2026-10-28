@@ -1,16 +1,21 @@
 """
 URL Pattern Filter (Gf-Patterns-inspired) - PASSIVE, zero network calls.
 
-Takes the URLs already collected by wayback_urls.py (wayback.txt) and sorts
-them into categories based on common vulnerability-indicator parameter
-names and file extensions - the same idea as tomnomnom's `gf` tool and the
-community Gf-Patterns set (github.com/1ndianl33t/Gf-Patterns), implemented
-directly in Python here instead of shelling out to `gf`. The category
-param-name lists below are inspired by those patterns, not a byte-for-byte
-copy of that repo's regexes.
+Takes URLs collected by wayback_urls.py and sorts them into categories
+based on common vulnerability-indicator parameter names and file
+extensions - the same idea as tomnomnom's `gf` tool and the community
+Gf-Patterns set (github.com/1ndianl33t/Gf-Patterns), implemented directly
+in Python here instead of shelling out to `gf`. The category param-name
+lists below are inspired by those patterns, not a byte-for-byte copy of
+that repo's regexes.
 
-This never contacts the target - it only re-reads data another module
-already collected, so run Wayback Machine URL Discovery first.
+Prefers uro_filter.py's cleaned-up URL list (uro_urls.txt) if that's been
+run, since testing duplicate-pattern URLs is wasted effort; falls back to
+the raw wayback.txt otherwise.
+
+This never contacts the target - it only re-reads data other modules
+already collected, so run Wayback Machine URL Discovery first (and
+optionally URL Cleaner (uro) before this, for a cleaner input set).
 """
 import os
 from urllib.parse import parse_qs, urlsplit
@@ -48,15 +53,21 @@ def get_cached(target_path: str) -> dict:
 
 
 def run(domain: str, target_path: str) -> dict:
+    # Prefer uro_filter.py's cleaned-up list (dupes/boring assets already
+    # dropped) if it's been run; otherwise fall back to the raw wayback.txt
+    # so this module still works on its own.
+    uro_path = os.path.join(target_path, "uro_urls.txt")
     wb_path = os.path.join(target_path, "wayback.txt")
-    if not os.path.isfile(wb_path):
+    source_path = uro_path if os.path.isfile(uro_path) else wb_path
+
+    if not os.path.isfile(source_path):
         return {
             "error": "No wayback.txt found for this target - run the Wayback Machine "
                      "tool first, this module filters its output.",
             "status": 400,
         }
 
-    with open(wb_path, "r", encoding="utf-8") as f:
+    with open(source_path, "r", encoding="utf-8") as f:
         urls = [line.strip() for line in f if line.strip()]
 
     matched = {}  # url -> set of categories
