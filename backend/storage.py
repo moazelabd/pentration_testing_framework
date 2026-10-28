@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+from datetime import datetime, timezone
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TARGETS_DIR = os.path.join(BASE_DIR, "targets")
@@ -62,6 +63,24 @@ def count_lines(path: str) -> int:
         return len([line for line in f if line.strip()])
 
 
+def count_matching_lines(path: str, substring: str) -> int:
+    if not os.path.isfile(path):
+        return 0
+    with open(path, "r", encoding="utf-8") as f:
+        return sum(1 for line in f if substring in line)
+
+
+def updated_at(target_path: str, filename: str):
+    """ISO timestamp of when a tool's result file was last written, or
+    None if that tool hasn't been run yet for this target - used to show
+    "last run" in the UI from the file's own mtime, no extra bookkeeping."""
+    path = os.path.join(target_path, filename)
+    if not os.path.isfile(path):
+        return None
+    ts = os.path.getmtime(path)
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
 def list_targets() -> list:
     targets = []
     for folder in sorted(os.listdir(TARGETS_DIR)):
@@ -72,6 +91,12 @@ def list_targets() -> list:
         meta = read_meta(target_path)
         meta["id"] = folder
         meta["subdomain_count"] = count_lines(os.path.join(target_path, "subdomains.txt"))
+        # Powers the sidebar's warning badge - counts confirmed-unescaped
+        # XSS reflections so a serious finding is visible without opening
+        # the target.
+        meta["xss_findings"] = count_matching_lines(
+            os.path.join(target_path, "xss_probe.txt"), "UNESCAPED"
+        )
         targets.append(meta)
     return targets
 

@@ -21,8 +21,13 @@ def get_cached(target_path: str) -> dict:
 
 
 def run(domain: str, target_path: str) -> dict:
-    scanner = nmap.PortScanner()
     try:
+        # PortScanner() itself probes for the nmap binary and raises
+        # PortScannerError if it's missing - this has to be inside the try
+        # block too, or a missing nmap crashes the whole Flask request with
+        # an unhandled exception (Flask then returns an HTML error page,
+        # which breaks the frontend's res.json() with a JSON-parse error).
+        scanner = nmap.PortScanner()
         # -Pn skips nmap's host-discovery ping. Without it, a target that
         # blocks ICMP (very common) gets reported as "down" even though
         # its TCP ports are reachable.

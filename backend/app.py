@@ -17,10 +17,19 @@ from flask import Flask, jsonify, request, send_from_directory
 import storage
 from modules.recon import (
     dns_records, endpoints, portscan, subdomains_all_in_one as subdomains,
-    tech_fingerprint, url_pattern_filter, wayback_urls, whois_lookup, xss_prober,
+    tech_fingerprint, url_pattern_filter, uro_filter, wayback_urls, whois_lookup, xss_prober,
 )
 
 app = Flask(__name__, static_folder=storage.FRONTEND_DIR, static_url_path="")
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(e):
+    # Safety net: any bug in a module that isn't caught locally would
+    # otherwise crash the request and make Flask return an HTML error
+    # page, which breaks the frontend's res.json() with a confusing
+    # "unexpected character" error instead of a readable message.
+    return jsonify({"error": f"Unexpected server error ({type(e).__name__}): {e}"}), 500
 
 
 def module_result(result: dict):
@@ -83,7 +92,9 @@ def get_subdomains(target_id):
     target_path = resolve_target(target_id)
     if not target_path:
         return jsonify({"error": "not found"}), 404
-    return jsonify(subdomains.get_cached(target_path))
+    result = subdomains.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "subdomains.txt")
+    return jsonify(result)
 
 
 @app.route("/api/targets/<target_id>/subdomains", methods=["POST"])
@@ -102,7 +113,9 @@ def get_portscan(target_id):
     target_path = resolve_target(target_id)
     if not target_path:
         return jsonify({"error": "not found"}), 404
-    return jsonify(portscan.get_cached(target_path))
+    result = portscan.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "ports.txt")
+    return jsonify(result)
 
 
 @app.route("/api/targets/<target_id>/portscan", methods=["POST"])
@@ -121,7 +134,9 @@ def get_endpoints(target_id):
     target_path = resolve_target(target_id)
     if not target_path:
         return jsonify({"error": "not found"}), 404
-    return jsonify(endpoints.get_cached(target_path))
+    result = endpoints.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "endpoints.txt")
+    return jsonify(result)
 
 
 @app.route("/api/targets/<target_id>/endpoints", methods=["POST"])
@@ -140,7 +155,9 @@ def get_dns_records(target_id):
     target_path = resolve_target(target_id)
     if not target_path:
         return jsonify({"error": "not found"}), 404
-    return jsonify(dns_records.get_cached(target_path))
+    result = dns_records.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "dns_records.txt")
+    return jsonify(result)
 
 
 @app.route("/api/targets/<target_id>/dns", methods=["POST"])
@@ -159,7 +176,9 @@ def get_whois(target_id):
     target_path = resolve_target(target_id)
     if not target_path:
         return jsonify({"error": "not found"}), 404
-    return jsonify(whois_lookup.get_cached(target_path))
+    result = whois_lookup.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "whois.txt")
+    return jsonify(result)
 
 
 @app.route("/api/targets/<target_id>/whois", methods=["POST"])
@@ -178,7 +197,9 @@ def get_techinfo(target_id):
     target_path = resolve_target(target_id)
     if not target_path:
         return jsonify({"error": "not found"}), 404
-    return jsonify(tech_fingerprint.get_cached(target_path))
+    result = tech_fingerprint.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "techinfo.txt")
+    return jsonify(result)
 
 
 @app.route("/api/targets/<target_id>/techinfo", methods=["POST"])
@@ -197,7 +218,9 @@ def get_wayback(target_id):
     target_path = resolve_target(target_id)
     if not target_path:
         return jsonify({"error": "not found"}), 404
-    return jsonify(wayback_urls.get_cached(target_path))
+    result = wayback_urls.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "wayback.txt")
+    return jsonify(result)
 
 
 @app.route("/api/targets/<target_id>/wayback", methods=["POST"])
@@ -209,6 +232,27 @@ def run_wayback_route(target_id):
     return module_result(wayback_urls.run(domain, target_path))
 
 
+# ---------- recon: URL cleaner (uro-inspired) ----------
+
+@app.route("/api/targets/<target_id>/uro", methods=["GET"])
+def get_uro(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = uro_filter.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "uro_urls.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/uro", methods=["POST"])
+def run_uro_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(uro_filter.run(domain, target_path))
+
+
 # ---------- recon: URL pattern filter (gf-patterns-inspired) ----------
 
 @app.route("/api/targets/<target_id>/urlpatterns", methods=["GET"])
@@ -216,7 +260,9 @@ def get_urlpatterns(target_id):
     target_path = resolve_target(target_id)
     if not target_path:
         return jsonify({"error": "not found"}), 404
-    return jsonify(url_pattern_filter.get_cached(target_path))
+    result = url_pattern_filter.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "url_patterns.txt")
+    return jsonify(result)
 
 
 @app.route("/api/targets/<target_id>/urlpatterns", methods=["POST"])
@@ -235,7 +281,9 @@ def get_xssprobe(target_id):
     target_path = resolve_target(target_id)
     if not target_path:
         return jsonify({"error": "not found"}), 404
-    return jsonify(xss_prober.get_cached(target_path))
+    result = xss_prober.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "xss_probe.txt")
+    return jsonify(result)
 
 
 @app.route("/api/targets/<target_id>/xssprobe", methods=["POST"])

@@ -54,7 +54,16 @@ Recon Framework - Tools / APIs Used Per Module
    Note: implemented directly in Python (param-name/extension matching), not a
    call-out to the real `gf` CLI tool.
 
-9) XSS Reflection Prober (dalfox-inspired)
+9) URL Cleaner (uro-inspired)
+   File: backend/modules/recon/uro_filter.py
+   Type: PASSIVE, zero network calls (re-reads wayback.txt from module 7)
+   Inspired by: uro  https://github.com/s0md3v/uro
+   Drops boring static-asset extensions and collapses near-duplicate URLs
+   (same path pattern + same query-param names, different ID/value).
+   url_pattern_filter.py (module 8) prefers this module's output
+   (uro_urls.txt) if present, falling back to raw wayback.txt otherwise.
+
+10) XSS Reflection Prober (dalfox-inspired)
    File: backend/modules/recon/xss_prober.py
    Type: ACTIVE (sends crafted requests to the target)
    Inspired by: dalfox / kxss reflection-detection technique
