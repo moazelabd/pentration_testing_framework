@@ -8,9 +8,10 @@ let activeId = null;
 let uiState = {
   sections: { recon: false },
   tools: {
-    subdomains: false, portscan: false, endpoints: false,
+    subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
+    portscan: false, endpoints: false,
     dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-    urlpatterns: false, xssprobe: false
+    urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false
   }
 };
 
@@ -18,25 +19,34 @@ function resetUiState() {
   uiState = {
     sections: { recon: false },
     tools: {
-      subdomains: false, portscan: false, endpoints: false,
+      subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
+      portscan: false, endpoints: false,
       dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-      urlpatterns: false, xssprobe: false
+      urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false
     }
   };
 }
 
 // Dependency-safe order for "Run All" - independent tools first, then the
-// Wayback -> uro -> URL Pattern Filter -> XSS Prober chain, in order.
+// enumeration -> live-probe -> URL chain:
+//   (subfinder | subdomains) -> httpx live probe -> status split ->
+//   wayback -> (uro | urldedupe) -> gf/allparams -> URL Pattern Filter -> XSS Prober
 const RUN_ALL_ORDER = [
+  { key: 'subfinder', endpoint: 'subfinder' },
   { key: 'subdomains', endpoint: 'subdomains' },
+  { key: 'httpxlive', endpoint: 'httpx_live' },
+  { key: 'httpxfilter', endpoint: 'httpx_filter' },
   { key: 'portscan', endpoint: 'portscan' },
   { key: 'dns', endpoint: 'dns' },
   { key: 'whois', endpoint: 'whois' },
   { key: 'techinfo', endpoint: 'techinfo' },
   { key: 'wayback', endpoint: 'wayback' },
+  { key: 'urldedupe', endpoint: 'urldedupe' },
   { key: 'uro', endpoint: 'uro' },
   { key: 'endpoints', endpoint: 'endpoints' },
   { key: 'urlpatterns', endpoint: 'urlpatterns' },
+  { key: 'gf', endpoint: 'gf' },
+  { key: 'allparams', endpoint: 'all_params' },
   { key: 'xssprobe', endpoint: 'xssprobe' },
 ];
 
@@ -270,13 +280,19 @@ function buildReportMarkdown(t, data) {
   let md = `# Recon Report - ${t.name}\n\n`;
   md += `**Target:** ${t.domain}\n**Generated:** ${new Date().toISOString()}\n\n---\n\n`;
   md += reportSection('Subdomain Enumeration (all-in-one)', data.subs);
+  md += reportSection('Subdomain Enumeration (subfinder)', data.subfinderSubs);
+  md += reportSection('Live Host Probe (httpx)', data.liveHosts);
+  md += reportSection('Live Host Status Split', data.httpxSplit);
   md += reportSection('Port Scan (nmap)', data.ports);
   md += reportSection('DNS Records', data.dnsRecords);
   md += reportSection('WHOIS / RDAP Lookup', data.whoisLines);
   md += reportSection('Directory / Endpoint Discovery', data.endpoints);
   md += reportSection('Wayback Machine URLs', data.waybackUrls);
   md += reportSection('URL Cleaner (uro)', data.uroUrls);
+  md += reportSection('URL Dedupe (urldedupe)', data.urldedupeUrls);
   md += reportSection('URL Pattern Filter (gf-patterns)', data.urlPatterns);
+  md += reportSection('Pattern Match (gf)', data.gfMatches);
+  md += reportSection('Parameter Collector (all_params)', data.paramUrls);
   md += reportSection('Tech Fingerprint + TLS', data.techLines);
   md += reportSection('XSS Reflection Prober (dalfox-inspired)', data.xssFindings);
   return md;
@@ -309,7 +325,7 @@ async function renderMain() {
     return;
   }
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -320,6 +336,12 @@ async function renderMain() {
     fetch(`${API}/${t.id}/uro`).then(r => r.json()),
     fetch(`${API}/${t.id}/urlpatterns`).then(r => r.json()),
     fetch(`${API}/${t.id}/xssprobe`).then(r => r.json()),
+    fetch(`${API}/${t.id}/subfinder`).then(r => r.json()),
+    fetch(`${API}/${t.id}/urldedupe`).then(r => r.json()),
+    fetch(`${API}/${t.id}/gf`).then(r => r.json()),
+    fetch(`${API}/${t.id}/all_params`).then(r => r.json()),
+    fetch(`${API}/${t.id}/httpx_live`).then(r => r.json()),
+    fetch(`${API}/${t.id}/httpx_filter`).then(r => r.json()),
   ]);
 
   const subs = subRes.subdomains || [];
@@ -332,11 +354,19 @@ async function renderMain() {
   const uroUrls = uroRes.urls || [];
   const urlPatterns = urlPatRes.matches || [];
   const xssFindings = xssRes.findings || [];
+  const subfinderSubs = subfinderRes.subdomains || [];
+  const urldedupeUrls = urldedRes.urls || [];
+  const gfMatches = gfRes.matches || [];
+  const paramUrls = paramsRes.urls || [];
+  const liveHosts = httpxLiveRes.hosts || [];
+  const httpxSplit = httpxFilterRes.summary || [];
 
   const reconOpen = uiState.sections.recon;
 
   const stats = [
     { label: 'Subdomains', value: subs.length },
+    { label: 'Subfinder', value: subfinderSubs.length },
+    { label: 'Live hosts', value: liveHosts.length },
     { label: 'Open ports', value: ports.length },
     { label: 'Endpoints', value: endpoints.length },
     { label: 'DNS records', value: dnsRecords.length },
@@ -344,7 +374,10 @@ async function renderMain() {
     { label: 'Tech fields', value: techLines.length },
     { label: 'Wayback URLs', value: waybackUrls.length },
     { label: 'Clean URLs (uro)', value: uroUrls.length },
+    { label: 'Deduped URLs', value: urldedupeUrls.length },
     { label: 'Pattern matches', value: urlPatterns.length },
+    { label: 'gf matches', value: gfMatches.length },
+    { label: 'Param URLs', value: paramUrls.length },
     { label: 'XSS findings', value: xssFindings.length, danger: true },
   ];
   const statsBarHTML = `
@@ -365,6 +398,35 @@ async function renderMain() {
       statusText: statusFor(subRes.ran, subs.length, 'subdomains'),
       updatedAt: subRes.updated_at,
       items: subs
+    }),
+    toolCardHTML({
+      key: 'subfinder',
+      title: 'Subdomain Enumeration (subfinder)',
+      description: 'Industry-standard subfinder CLI - passive enumeration across certificate logs and other public sources. No traffic sent to the target.',
+      note: `Saved to targets/${t.id}/subfinder.txt · requires subfinder installed on this machine`,
+      statusText: statusFor(subfinderRes.ran, subfinderSubs.length, 'subdomains'),
+      updatedAt: subfinderRes.updated_at,
+      items: subfinderSubs
+    }),
+    toolCardHTML({
+      key: 'httpxlive',
+      title: 'Live Host Probe (httpx)',
+      description: 'Industry-standard httpx CLI - probes every subdomain and keeps all live responses: 200, 301/302 redirects AND 401/403 (restricted) and 404 (interesting), annotated with titles and detected tech. Active - sends HTTP requests to the target\u2019s hosts.',
+      note: `Saved to targets/${t.id}/live_hosts.txt · requires httpx installed on this machine`,
+      statusText: statusFor(httpxLiveRes.ran, liveHosts.length, 'live hosts'),
+      updatedAt: httpxLiveRes.updated_at,
+      items: liveHosts,
+      disabledReason: !subfinderRes.ran && !subRes.ran ? 'Run "Subfinder" or "Subdomain Enumeration" first' : null
+    }),
+    toolCardHTML({
+      key: 'httpxfilter',
+      title: 'Live Host Filter (403/404 Split)',
+      description: 'Splits the httpx results into live_200.txt, live_301/302.txt, live_401.txt, live_403.txt and live_404.txt so each class of live host can be triaged separately. Passive, zero traffic - run the Live Host Probe first.',
+      note: `Saved to targets/${t.id}/live_<code>.txt`,
+      statusText: statusFor(httpxFilterRes.ran, liveHosts.length, 'hosts split'),
+      updatedAt: httpxFilterRes.updated_at,
+      items: httpxSplit,
+      disabledReason: !httpxLiveRes.ran ? 'Run "Live Host Probe (httpx)" first' : null
     }),
     toolCardHTML({
       key: 'portscan',
@@ -425,6 +487,16 @@ async function renderMain() {
       disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
     }),
     toolCardHTML({
+      key: 'urldedupe',
+      title: 'URL Dedupe (urldedupe)',
+      description: 'Industry-standard urldedupe CLI - collapses near-duplicate URLs from the Wayback list (differing only by parameter values), fast. Passive, zero traffic - run Wayback Machine first.',
+      note: `Saved to targets/${t.id}/urldedupe.txt · requires urldedupe installed on this machine`,
+      statusText: statusFor(urldedRes.ran, urldedupeUrls.length, 'URLs kept'),
+      updatedAt: urldedRes.updated_at,
+      items: urldedupeUrls,
+      disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
+    }),
+    toolCardHTML({
       key: 'urlpatterns',
       title: 'URL Pattern Filter (gf-patterns)',
       description: 'Sorts URLs into categories (xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext) by param name / extension. Uses the uro-cleaned list if available. Passive, zero traffic - run Wayback Machine first.',
@@ -433,6 +505,26 @@ async function renderMain() {
       updatedAt: urlPatRes.updated_at,
       items: urlPatterns,
       disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
+    }),
+    toolCardHTML({
+      key: 'gf',
+      title: 'Pattern Match (gf)',
+      description: 'Industry-standard gf CLI with Gf-Patterns - pulls URLs matching each category (xss, sqli, ssrf, lfi, rce, redirect, idor, debug_logic) into gf_<pattern>.txt files. Runs on the urldedupe output when available, wayback otherwise.',
+      note: `Saved to targets/${t.id}/gf_<pattern>.txt · requires gf + Gf-Patterns installed on this machine`,
+      statusText: statusFor(gfRes.ran, gfMatches.length, 'matches found'),
+      updatedAt: gfRes.updated_at,
+      items: gfMatches,
+      disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
+    }),
+    toolCardHTML({
+      key: 'allparams',
+      title: 'Parameter Collector',
+      description: 'Consolidates every parameterized URL (?id=1, ?page=2, ...) found across Subfinder results and the cleaned URL lists into one worklist (all_params.txt) for the active-testing phase. Passive, zero traffic.',
+      note: `Saved to targets/${t.id}/all_params.txt`,
+      statusText: statusFor(paramsRes.ran, paramUrls.length, 'parameterized URLs'),
+      updatedAt: paramsRes.updated_at,
+      items: paramUrls,
+      disabledReason: !subfinderRes.ran && !waybackRes.ran ? 'Run "Subfinder" or "Wayback Machine URLs" first' : null
     }),
   ].join(''));
 
@@ -502,12 +594,16 @@ async function renderMain() {
 
   document.getElementById('export-report-btn').addEventListener('click', () => {
     downloadReport(t, {
-      subs, ports, dnsRecords, whoisLines, endpoints,
-      waybackUrls, uroUrls, urlPatterns, techLines, xssFindings
+      subs, subfinderSubs, liveHosts, httpxSplit, ports, dnsRecords, whoisLines, endpoints,
+      waybackUrls, uroUrls, urldedupeUrls, urlPatterns, gfMatches, paramUrls,
+      techLines, xssFindings
     });
   });
 
   wireToolCard('subdomains', subs, () => runTool({ key: 'subdomains', endpoint: 'subdomains', t }));
+  wireToolCard('subfinder', subfinderSubs, () => runTool({ key: 'subfinder', endpoint: 'subfinder', t }));
+  wireToolCard('httpxlive', liveHosts, () => runTool({ key: 'httpxlive', endpoint: 'httpx_live', t }));
+  wireToolCard('httpxfilter', httpxSplit, () => runTool({ key: 'httpxfilter', endpoint: 'httpx_filter', t }));
   wireToolCard('portscan', ports, () => runTool({ key: 'portscan', endpoint: 'portscan', t }));
   wireToolCard('endpoints', endpoints, () => runTool({ key: 'endpoints', endpoint: 'endpoints', t }));
   wireToolCard('dns', dnsRecords, () => runTool({ key: 'dns', endpoint: 'dns', t }));
@@ -515,7 +611,10 @@ async function renderMain() {
   wireToolCard('techinfo', techLines, () => runTool({ key: 'techinfo', endpoint: 'techinfo', t }));
   wireToolCard('wayback', waybackUrls, () => runTool({ key: 'wayback', endpoint: 'wayback', t }));
   wireToolCard('uro', uroUrls, () => runTool({ key: 'uro', endpoint: 'uro', t }));
+  wireToolCard('urldedupe', urldedupeUrls, () => runTool({ key: 'urldedupe', endpoint: 'urldedupe', t }));
   wireToolCard('urlpatterns', urlPatterns, () => runTool({ key: 'urlpatterns', endpoint: 'urlpatterns', t }));
+  wireToolCard('gf', gfMatches, () => runTool({ key: 'gf', endpoint: 'gf', t }));
+  wireToolCard('allparams', paramUrls, () => runTool({ key: 'allparams', endpoint: 'all_params', t }));
   wireToolCard('xssprobe', xssFindings, () => runTool({ key: 'xssprobe', endpoint: 'xssprobe', t }));
 }
 

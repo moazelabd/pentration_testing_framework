@@ -72,7 +72,86 @@ Recon Framework - Tools / APIs Used Per Module
    param, flags it if the marker reflects back UNESCAPED (signal, not proof,
    of reflected XSS - no <script> payload is injected or executed).
 
-----------------------------------------------------------------------
+11) Subdomain Enumeration (subfinder)
+   File: backend/modules/recon/subfinder_enum.py
+   Type: PASSIVE (subfinder only queries public data sources)
+   Tool used:
+     - subfinder (industry-standard Go CLI, projectdiscovery)
+       https://github.com/projectdiscovery/subfinder
+       install: go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+   Command: subfinder -d <domain> -silent -o <target_path>/subfinder.txt
+   Output: subfinder.txt - one subdomain per line, deduplicated + sorted
+   Note: runs alongside module 1 (all-in-one). Either or both can be used.
+
+12) URL Dedupe (urldedupe)
+   File: backend/modules/recon/urldedupe_filter.py
+   Type: PASSIVE, zero network calls (re-reads wayback.txt from module 7)
+   Tool used:
+     - urldedupe (industry-standard Go CLI, ameenmaali)
+       https://github.com/ameenmaali/urldedupe
+       install: go install -v github.com/ameenmaali/urldedupe@latest
+   Method: pipes wayback.txt into `urldedupe -s` (stdin), captures stdout
+   Output: urldedupe.txt - unique URLs only
+   Note: runs alongside module 9 (uro_filter). Both stay available.
+
+13) URL Pattern Extraction (gf)
+   File: backend/modules/recon/gf_extractor.py
+   Type: PASSIVE, zero network calls (re-reads urldedupe.txt from module 12,
+         falling back to wayback.txt from module 7)
+   Tool used:
+     - gf (industry-standard Go CLI, tomnomnom) with the Gf-Patterns set
+       https://github.com/tomnomnom/gf
+       install: go install -v github.com/tomnomnom/gf@latest
+       patterns: git clone https://github.com/1ndianl33t/Gf-Patterns ~/.gf/patterns
+   Command: for pattern in xss, sqli, ssrf, lfi, rce, redirect, idor,
+   debug_logic: pipe input URLs into `gf <pattern>`
+   Output: gf_<pattern>.txt per category (gf_xss.txt, gf_sqli.txt, ...)
+   Note: runs alongside module 8 (url_pattern_filter). Pattern names match
+   module 8's categories so downstream modules can consume either output.
+
+14) Parameter Collector
+   File: backend/modules/recon/param_collector.py
+   Type: PASSIVE, zero network calls (pure file merge)
+   Reads: subfinder.txt (module 11) + cleaned URLs - urldedupe.txt
+     (module 12) preferred, then uro_urls.txt (module 9) /
+     wayback.txt (module 7) as fallbacks
+   Method: combines the subdomains + URLs, keeps only lines containing '?'
+     (parameterized URLs), deduplicates, and stores the single worklist
+     for the active-testing phase.
+   Output: all_params.txt - ready for the XSS Prober (module 10) or the
+     future vuln_scan modules, so they don't re-merge per-tool outputs
+     themselves.
+
+
+15) Live Host Discovery (httpx)
+   File: backend/modules/recon/httpx_live.py
+   Type: ACTIVE (sends HTTP requests to every subdomain found)
+   Tool used:
+     - httpx (industry-standard Go CLI, ProjectDiscovery)
+       https://github.com/projectdiscovery/httpx
+       install: go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+   Command: httpx -silent -status-code -title -tech-detect
+            -mc 200,301,302,401,403,404 (hosts piped in via stdin)
+   Reads: subfinder.txt (module 11) preferred, subdomains.txt (module 1)
+     as fallback (source tags stripped so httpx only sees bare hostnames)
+   Output: live_hosts.txt - one line per alive host, e.g.
+     "https://sub.example.com [200] [Page title] [nginx]"
+   IMPORTANT: on purpose it does NOT keep only 200 OK - 401/403
+     (access-restricted) and 404 hosts are kept too because they are
+     often the most interesting attack surfaces. Filtering happens
+     later, in module 16.
+
+16) Live Host Status-Code Splitter
+   File: backend/modules/recon/httpx_filter.py
+   Type: PASSIVE, zero network calls (re-reads live_hosts.txt from module 15)
+   Method: splits live_hosts.txt by the status code annotated in each
+     httpx line; code set mirrors module 15's -mc list
+   Output: live_200.txt, live_301.txt, live_302.txt, live_401.txt,
+     live_403.txt, live_404.txt (a file per code, only written when hits
+     exist; stale files from previous runs are cleaned)
+   Note: the 401/403 files double as a direct-access shortlist - those
+     hosts exist but are access-restricted, usually worth a manual look.
+
 Core backend stack (not recon-specific):
    - Flask        (web framework / API routes)
    - requests     (HTTP client, used by most modules above)

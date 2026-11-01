@@ -44,26 +44,47 @@ tool) and **Monitoring** (placeholder, not built yet).
 
 ## Tool order
 
-Most tools run independently. These four build on each other, in order -
+Most tools run independently. The dependent ones build chains, in order -
 the UI disables a tool's Run button until its prerequisite has run:
 
 ```
-Wayback Machine URLs -> URL Cleaner (uro) -> URL Pattern Filter -> XSS Reflection Prober
+Subfinder (+ Subdomain Enumeration) -> Live Host Probe (httpx) -> Live Host Filter
+Wayback Machine URLs -> URL Cleaner (uro)   -> URL Pattern Filter -> XSS Reflection Prober
+                     -> URL Dedupe (urldedupe) -> Pattern Match (gf) -> Parameter Collector
                      \-> Directory / Endpoint Discovery
 ```
 
 **Run All** (top of the Recon section) runs every tool in this safe order
 automatically, skipping past any tool that fails.
 
-Tools are grouped into **Discovery** (Subdomains, Port Scan, DNS, WHOIS),
-**Content & URL Analysis** (Endpoints, Wayback, uro, URL Pattern Filter),
+Tools are grouped into **Discovery** (Subdomains, Subfinder, Live Host Probe, Live Host Filter, Port Scan, DNS, WHOIS),
+**Content & URL Analysis** (Endpoints, Wayback, uro, urldedupe, URL Pattern Filter, gf, Parameter Collector),
 and **Active Testing** (Tech Fingerprint, XSS Prober).
+
+## External CLI tools (optional but recommended)
+
+The new industry-standard modules need the Go binaries on your PATH:
+
+```bash
+go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+go install -v github.com/ameenmaali/urldedupe@latest
+go install -v github.com/tomnomnom/gf@latest
+git clone https://github.com/1ndianl33t/Gf-Patterns ~/.gf/patterns   # gf pattern set
+```
+
+nmap stays a separate package install (`apt install nmap`). If a CLI tool
+is missing, its card shows an error message with the install command -
+the rest of the pipeline keeps working.
 
 ## Tools
 
 | Tool | Type | What it does |
 |---|---|---|
 | Subdomain Enumeration (all-in-one) | passive | Merges crt.sh, CertSpotter, HackerTarget - deduplicated, tagged by source |
+| Subdomain Enumeration (subfinder) | passive | Industry-standard `subfinder` CLI - needs subfinder on your PATH |
+| Live Host Probe (httpx) | active | Industry-standard `httpx` CLI - probes every subdomain, keeps 200/301/302/401/403/404 with titles + tech. Needs httpx on your PATH |
+| Live Host Filter (403/404 Split) | passive | Splits live_hosts.txt into live_<code>.txt files for per-status triage |
 | Port Scan (nmap) | active | Top 100 TCP ports. **Requires nmap installed separately** - [nmap.org](https://nmap.org/download.html) / `brew install nmap` / `apt install nmap` |
 | Directory / Endpoint Discovery | active | Built-in path list + real paths from Wayback results |
 | DNS Records | mostly passive | A/AAAA/MX/NS/TXT/CNAME/SOA + zone-transfer (AXFR) attempt |
@@ -72,6 +93,9 @@ and **Active Testing** (Tech Fingerprint, XSS Prober).
 | Wayback Machine URLs | passive | Historical URLs from archive.org |
 | URL Cleaner (uro) | passive | Drops static assets, collapses near-duplicate URLs |
 | URL Pattern Filter (gf-patterns) | passive | Tags URLs: xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext |
+| URL Dedupe (urldedupe) | passive | Industry-standard `urldedupe` CLI - collapses near-duplicate URLs from wayback.txt |
+| Pattern Match (gf) | passive | Industry-standard `gf` CLI + Gf-Patterns - writes gf_<pattern>.txt per category |
+| Parameter Collector | passive | Merges subfinder + cleaned URLs, keeps only `?parameterized` URLs into all_params.txt (worklist for the active-testing phase) |
 | XSS Reflection Prober (dalfox-inspired) | active | Injects a marker per param, flags unescaped reflections (signal, not proof) |
 
 Results save to `backend/targets/<target-id>/*.txt`, one file per tool.
@@ -97,7 +121,10 @@ button is also just a placeholder for now.
 | GET | `/api/targets` | List targets |
 | POST | `/api/targets` | Add a target `{name, domain}` |
 | DELETE | `/api/targets/<id>` | Delete a target |
-| GET/POST | `/api/targets/<id>/subdomains` | Subdomain Enumeration |
+| GET/POST | `/api/targets/<id>/subdomains` | Subdomain Enumeration (all-in-one) |
+| GET/POST | `/api/targets/<id>/subfinder` | Subdomain Enumeration (subfinder) |
+| GET/POST | `/api/targets/<id>/httpx_live` | Live Host Probe (httpx) |
+| GET/POST | `/api/targets/<id>/httpx_filter` | Live Host Filter (status split) |
 | GET/POST | `/api/targets/<id>/portscan` | Port Scan |
 | GET/POST | `/api/targets/<id>/endpoints` | Endpoint Discovery |
 | GET/POST | `/api/targets/<id>/dns` | DNS Records |
@@ -105,6 +132,9 @@ button is also just a placeholder for now.
 | GET/POST | `/api/targets/<id>/techinfo` | Tech Fingerprint + TLS |
 | GET/POST | `/api/targets/<id>/wayback` | Wayback Machine URLs |
 | GET/POST | `/api/targets/<id>/uro` | URL Cleaner |
+| GET/POST | `/api/targets/<id>/urldedupe` | URL Dedupe (urldedupe) |
+| GET/POST | `/api/targets/<id>/gf` | Pattern Match (gf) |
+| GET/POST | `/api/targets/<id>/all_params` | Parameter Collector |
 | GET/POST | `/api/targets/<id>/urlpatterns` | URL Pattern Filter |
 | GET/POST | `/api/targets/<id>/xssprobe` | XSS Reflection Prober |
 

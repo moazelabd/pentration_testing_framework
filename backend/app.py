@@ -16,8 +16,11 @@ from flask import Flask, jsonify, request, send_from_directory
 
 import storage
 from modules.recon import (
-    dns_records, endpoints, portscan, subdomains_all_in_one as subdomains,
-    tech_fingerprint, url_pattern_filter, uro_filter, wayback_urls, whois_lookup, xss_prober,
+    dns_records, endpoints, gf_extractor, httpx_filter, httpx_live,
+    param_collector, portscan,
+    subfinder_enum, subdomains_all_in_one as subdomains,
+    tech_fingerprint, url_pattern_filter, urldedupe_filter,
+    uro_filter, wayback_urls, whois_lookup, xss_prober,
 )
 
 app = Flask(__name__, static_folder=storage.FRONTEND_DIR, static_url_path="")
@@ -293,6 +296,132 @@ def run_xssprobe_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(xss_prober.run(domain, target_path))
+
+
+# ---------- recon: subfinder (industry-standard subdomain enum) ----------
+
+@app.route("/api/targets/<target_id>/subfinder", methods=["GET"])
+def get_subfinder(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = subfinder_enum.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "subfinder.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/subfinder", methods=["POST"])
+def run_subfinder_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(subfinder_enum.run(domain, target_path))
+
+
+# ---------- recon: urldedupe (industry-standard URL dedupe) ----------
+
+@app.route("/api/targets/<target_id>/urldedupe", methods=["GET"])
+def get_urldedupe(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = urldedupe_filter.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "urldedupe.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/urldedupe", methods=["POST"])
+def run_urldedupe_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(urldedupe_filter.run(domain, target_path))
+
+
+# ---------- recon: gf (industry-standard pattern extraction) ----------
+
+@app.route("/api/targets/<target_id>/gf", methods=["GET"])
+def get_gf(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = gf_extractor.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "gf_xss.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/gf", methods=["POST"])
+def run_gf_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(gf_extractor.run(domain, target_path))
+
+
+# ---------- recon: parameter collection (feeds active testing) ----------
+
+@app.route("/api/targets/<target_id>/all_params", methods=["GET"])
+def get_all_params(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = param_collector.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "all_params.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/all_params", methods=["POST"])
+def run_all_params_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(param_collector.run(domain, target_path))
+
+
+# ---------- recon: live host probe (industry-standard httpx) ----------
+
+@app.route("/api/targets/<target_id>/httpx_live", methods=["GET"])
+def get_httpx_live(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = httpx_live.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "live_hosts.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/httpx_live", methods=["POST"])
+def run_httpx_live_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(httpx_live.run(domain, target_path))
+
+
+# ---------- recon: live host status-code splitter ----------
+
+@app.route("/api/targets/<target_id>/httpx_filter", methods=["GET"])
+def get_httpx_filter(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = httpx_filter.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "live_200.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/httpx_filter", methods=["POST"])
+def run_httpx_filter_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(httpx_filter.run(domain, target_path))
 
 
 if __name__ == "__main__":

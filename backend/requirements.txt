@@ -1,3 +1,18 @@
+# Python dependencies for the Flask backend and recon modules.
+# NOTE: The following external CLI tools must be installed on the system and
+# available in PATH (they are NOT pip packages - see README.md
+# "External CLI tools" for details):
+#   - subfinder (ProjectDiscovery)
+#     go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+#   - httpx (ProjectDiscovery)
+#     go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+#   - nmap
+#     apt install nmap   /   brew install nmap   /   https://nmap.org/download
+#   - urldedupe (ameenmaali)
+#     go install -v github.com/ameenmaali/urldedupe@latest
+#   - gf (tomnomnom) + Gf-Patterns set
+#     go install -v github.com/tomnomnom/gf@latest
+#     git clone https://github.com/1ndianl33t/Gf-Patterns ~/.gf/patterns
 Flask==3.0.3
 requests==2.32.3
 python-nmap==0.7.1
