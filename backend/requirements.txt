@@ -16,7 +16,9 @@
 #     go install -v github.com/ameenmaali/urldedupe@latest
 #   - gf (tomnomnom) + Gf-Patterns set
 #     go install -v github.com/tomnomnom/gf@latest
-#     git clone https://github.com/1ndianl33t/Gf-Patterns ~/.gf/patterns
+#     # Gf-Patterns json files go DIRECTLY into ~/.gf (gf reads that dir):
+#     git clone https://github.com/1ndianl33t/Gf-Patterns
+#     cp Gf-Patterns/*.json ~/.gf/
 Flask==3.0.3
 requests==2.32.3
 python-nmap==0.7.1

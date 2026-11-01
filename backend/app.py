@@ -16,7 +16,8 @@ from flask import Flask, jsonify, request, send_from_directory
 
 import storage
 from modules.recon import (
-    dns_records, endpoints, gf_extractor, httpx_filter, httpx_live,
+    dns_records, endpoints, gf_filter, gf_extractor, gf_summary,
+    httpx_filter, httpx_live,
     js_param_collector, js_extractor, jsluice_secrets, jsluice_urls,
     katana_crawl, param_collector, portscan,
     subfinder_enum, subdomains_all_in_one as subdomains,
@@ -528,6 +529,50 @@ def run_js_params_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(js_param_collector.run(domain, target_path))
+
+
+# ---------- recon: gf filtering of the all_params worklist ----------
+# NOTE: /api/targets/<id>/gf already belongs to gf_extractor.py (the wayback/
+# urldedupe-based gf run) - this pair covers the all_params.txt pipeline.
+
+@app.route("/api/targets/<target_id>/gf_filter", methods=["GET"])
+def get_gf_filter(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = gf_filter.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "gf_xss.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/gf_filter", methods=["POST"])
+def run_gf_filter_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(gf_filter.run(domain, target_path))
+
+
+# ---------- recon: gf per-pattern summary report ----------
+
+@app.route("/api/targets/<target_id>/gf_summary", methods=["GET"])
+def get_gf_summary(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = gf_summary.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "gf_summary.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/gf_summary", methods=["POST"])
+def run_gf_summary_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(gf_summary.run(domain, target_path))
 
 
 if __name__ == "__main__":

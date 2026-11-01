@@ -233,6 +233,16 @@ body { overflow: hidden; }
 .tool-status.locked { color: var(--text-faint); font-style: italic; }
 
 .tool-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+/* GF pattern-count badges shown in a tool-card header */
+.gf-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
+.gf-badge {
+  padding: 2px 8px; border-radius: 10px; font-size: 11px;
+  font-family: var(--mono); border: 1px solid var(--border); color: var(--text-dim);
+}
+.gf-badge-danger { border-color: var(--danger); color: var(--danger); }
+.gf-badge-warn { border-color: var(--accent-dim); color: var(--accent); }
+.gf-badge-info { border-color: var(--border); color: var(--text-dim); }
 .ghost-btn {
   background: transparent; border: 1px solid var(--border); color: var(--text-dim);
   padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; font-family: var(--sans);

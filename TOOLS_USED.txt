@@ -231,6 +231,47 @@ Recon Framework - Tools / APIs Used Per Module
    Output: all_params.txt - shared input for gf (module 13), the XSS
      Prober (module 10) and the future vuln_scan phase.
 
+
+22) GF Parameter Filtering (all_params worklist)
+   File: backend/modules/recon/gf_filter.py
+   Type: PASSIVE, zero network calls (gf is a local pattern matcher)
+   Tool used:
+     - gf (GoFish, tomnomnom) with the community Gf-Patterns set
+       https://github.com/tomnomnom/gf
+       install: go install -v github.com/tomnomnom/gf@latest
+       patterns REQUIRED (gf loads them from ~/.gf, one level):
+         git clone https://github.com/1ndianl33t/Gf-Patterns
+         cp Gf-Patterns/*.json ~/.gf/
+   Purpose: gf tags URLs on parameter names and file extensions - a URL
+     with ?q= or ?search= lands in the "xss" category, ?id= in "sqli"/
+     "idor", ?path=/ ?file= in "lfi", .php/.bak/.env extensions in
+     "interesting_ext", etc.
+   Command: for pattern in xss, sqli, ssrf, lfi, rce, idor, redirect,
+     debug_logic, interesting_ext: pipe all_params.txt into `gf <pattern>`
+     (gf reads stdin). Canonical Gf-Patterns filenames are tried first,
+     with aliases as fallback (the set ships interestingEXT.json).
+   Reads: all_params.txt (module 21/14 combined worklist)
+   Output: gf_<pattern>.txt per category (same downstream filenames as
+     module 13, so the XSS Prober keeps reading gf_xss.txt); response
+     carries per-pattern counts. Missing patterns are reported as a
+     warning instead of failing the run.
+   Note: differs from module 13 only in INPUT (wayback/urldedupe URLs
+     there, the merged JS-phase worklist here) - module 13 stays intact.
+     Prerequisite: ~user/.gf exists and contains .json pattern files;
+     otherwise the module refuses to run with install instructions.
+
+23) GF Summary Report
+   File: backend/modules/recon/gf_summary.py
+   Type: PASSIVE, zero network calls
+   Method: scans every gf_*.txt in the target folder, one count per
+     pattern, plus a "priority review" note (rce/sqli/xss first).
+   Output: gf_summary.txt, e.g.
+       # gf summary - example.com
+       xss: 12
+       sqli: 8
+   Exposed via GET/POST /api/targets/<id>/gf_summary so the frontend
+     renders the counts as colored badges without reading files.
+
 Core backend stack (not recon-specific):
    - Flask        (web framework / API routes)
    - requests     (HTTP client, used by most modules above)

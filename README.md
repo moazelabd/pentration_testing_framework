@@ -58,7 +58,7 @@ Wayback Machine URLs -> URL Cleaner (uro)   -> URL Pattern Filter -> XSS Reflect
 automatically, skipping past any tool that fails.
 
 Tools are grouped into **Discovery** (Subdomains, Subfinder, Live Host Probe, Live Host Filter, Port Scan, DNS, WHOIS),
-**Content & URL Analysis** (Endpoints, Wayback, uro, urldedupe, URL Pattern Filter, gf, Parameter Collector),
+**Content & URL Analysis** (Endpoints, Wayback, uro, urldedupe, URL Pattern Filter, gf, Parameter Collector, gf_filter, gf_summary),
 and **Active Testing** (Tech Fingerprint, XSS Prober).
 
 ## External CLI tools (optional but recommended)
@@ -72,7 +72,8 @@ go install -v github.com/projectdiscovery/katana/cmd/katana@latest
 go install github.com/BishopFox/jsluice/cmd/jsluice@latest
 go install -v github.com/ameenmaali/urldedupe@latest
 go install -v github.com/tomnomnom/gf@latest
-git clone https://github.com/1ndianl33t/Gf-Patterns ~/.gf/patterns   # gf pattern set
+git clone https://github.com/1ndianl33t/Gf-Patterns
+cp Gf-Patterns/*.json ~/.gf/    # gf reads patterns directly from ~/.gf
 ```
 
 nmap stays a separate package install (`apt install nmap`). If a CLI tool
@@ -92,6 +93,8 @@ the rest of the pipeline keeps working.
 | JS URLs (jsluice) | active-ish | `jsluice urls -I` (Bishop Fox, tree-sitter) - real fetch/redirect/API URLs + params from JS, not regex |
 | JS Secrets (jsluice) | active-ish | `jsluice secrets` - AWS/GCP/GitHub/Firebase tokens and keys leaked in JS, per-finding severity summary |
 | JS Parameter Collector | passive | Merges jsluice + katana + existing params into all_params.txt (input for gf / active testing) |
+| GF Parameter Filtering | passive | Industry-standard `gf` + Gf-Patterns - tags the all_params worklist per category (gf_<pattern>.txt), counts as badges |
+| GF Summary Report | passive | Per-pattern count report (gf_summary.txt) with priority-review note |
 | Port Scan (nmap) | active | Top 100 TCP ports. **Requires nmap installed separately** - [nmap.org](https://nmap.org/download.html) / `brew install nmap` / `apt install nmap` |
 | Directory / Endpoint Discovery | active | Built-in path list + real paths from Wayback results |
 | DNS Records | mostly passive | A/AAAA/MX/NS/TXT/CNAME/SOA + zone-transfer (AXFR) attempt |
@@ -99,8 +102,7 @@ the rest of the pipeline keeps working.
 | Tech Fingerprint + TLS | active | Server headers + TLS certificate details |
 | Wayback Machine URLs | passive | Historical URLs from archive.org |
 | URL Cleaner (uro) | passive | Drops static assets, collapses near-duplicate URLs |
-| URL Pattern Filter (gf-patterns) | passive | Tags URLs: xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext |
-| URL Dedupe (urldedupe) | passive | Industry-standard `urldedupe` CLI - collapses near-duplicate URLs from wayback.txt |
+| URL Pattern Filter (gf-patterns) | passive | Tags URLs: xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext || URL Dedupe (urldedupe) | passive | Industry-standard `urldedupe` CLI - collapses near-duplicate URLs from wayback.txt |
 | Pattern Match (gf) | passive | Industry-standard `gf` CLI + Gf-Patterns - writes gf_<pattern>.txt per category |
 | Parameter Collector | passive | Merges subfinder + cleaned URLs, keeps only `?parameterized` URLs into all_params.txt (worklist for the active-testing phase) |
 | XSS Reflection Prober (dalfox-inspired) | active | Injects a marker per param, flags unescaped reflections (signal, not proof) |
@@ -146,6 +148,8 @@ button is also just a placeholder for now.
 | GET/POST | `/api/targets/<id>/uro` | URL Cleaner |
 | GET/POST | `/api/targets/<id>/urldedupe` | URL Dedupe (urldedupe) |
 | GET/POST | `/api/targets/<id>/gf` | Pattern Match (gf) |
+| GET/POST | `/api/targets/<id>/gf_filter` | GF Parameter Filtering (all_params) |
+| GET/POST | `/api/targets/<id>/gf_summary` | GF Summary Report |
 | GET/POST | `/api/targets/<id>/all_params` | Parameter Collector |
 | GET/POST | `/api/targets/<id>/urlpatterns` | URL Pattern Filter |
 | GET/POST | `/api/targets/<id>/xssprobe` | XSS Reflection Prober |

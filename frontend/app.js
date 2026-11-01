@@ -12,7 +12,8 @@ let uiState = {
     portscan: false, endpoints: false,
     dns: false, whois: false, techinfo: false, wayback: false, uro: false,
     urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
-    katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false
+    katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
+    gffilter: false, gfsummary: false
   }
 };
 
@@ -24,7 +25,8 @@ function resetUiState() {
       portscan: false, endpoints: false,
       dns: false, whois: false, techinfo: false, wayback: false, uro: false,
       urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
-      katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false
+      katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
+      gffilter: false, gfsummary: false
     }
   };
 }
@@ -43,6 +45,8 @@ const RUN_ALL_ORDER = [
   { key: 'jsurls', endpoint: 'jsluice_urls' },
   { key: 'jssecrets', endpoint: 'jsluice_secrets' },
   { key: 'jsparams', endpoint: 'js_params' },
+  { key: 'gffilter', endpoint: 'gf_filter' },
+  { key: 'gfsummary', endpoint: 'gf_summary' },
   { key: 'portscan', endpoint: 'portscan' },
   { key: 'dns', endpoint: 'dns' },
   { key: 'whois', endpoint: 'whois' },
@@ -151,7 +155,22 @@ function formatRelativeTime(iso) {
 // actually need filtering.
 const SEARCH_THRESHOLD = 8;
 
-function toolCardHTML({ key, title, description, note, statusText, items, disabledReason, updatedAt }) {
+// Turns gf_filter counts into colored badges for the card header -
+// danger = categories worth triaging first (see CRITICAL_TAGS above).
+function gfPatternBadges(counts) {
+  const DANGER = ['rce', 'sqli'];
+  const WARN = ['xss', 'ssrf', 'lfi'];
+  const LABELS = { xss: 'XSS', sqli: 'SQLi', ssrf: 'SSRF', lfi: 'LFI', rce: 'RCE',
+                   idor: 'IDOR', redirect: 'Redirect', debug_logic: 'Debug',
+                   interesting_ext: 'IntExt' };
+  return Object.entries(counts)
+    .filter(([p, v]) => v > 0 && LABELS[p])
+    .sort((a, b) => b[1] - a[1])
+    .map(([p, v]) => ({ label: LABELS[p], value: v,
+                        cls: DANGER.includes(p) ? 'danger' : WARN.includes(p) ? 'warn' : 'info' }));
+}
+
+function toolCardHTML({ key, title, description, note, statusText, items, disabledReason, updatedAt, badges }) {
   const open = uiState.tools[key];
   const disabledAttr = disabledReason ? 'disabled' : '';
   const titleAttr = disabledReason ? ` title="${disabledReason}"` : '';
@@ -161,12 +180,16 @@ function toolCardHTML({ key, title, description, note, statusText, items, disabl
   const relTime = formatRelativeTime(updatedAt);
   const fullNote = relTime ? `${note} · Last run: ${relTime}` : note;
   const showSearch = items.length > SEARCH_THRESHOLD;
+  const badgesHTML = (badges || [])
+    .map(b => `<span class="gf-badge gf-badge-${b.cls}">${b.label}: ${b.value}</span>`)
+    .join(' ');
   return `
     <div class="tool-card">
       <div class="tool-card-head" id="tool-head-${key}">
         <span class="chevron ${open ? 'open' : ''}">&#9656;</span>
         <div class="tool-info">
           <h3>${title}</h3>
+          ${badgesHTML ? `<div class="gf-badges">${badgesHTML}</div>` : ''}
           <p>${description}</p>
         </div>
       </div>
@@ -295,6 +318,8 @@ function buildReportMarkdown(t, data) {
   md += reportSection('JS URLs (jsluice)', data.jsUrlsFound);
   md += reportSection('JS Secrets (jsluice)', data.jsSecretFindings);
   md += reportSection('JS Parameter Worklist (all_params)', data.jsParamUrls);
+  md += reportSection('GF Filtering (all_params)', data.gfTagged);
+  md += reportSection('GF Summary', data.gfSummary);
   md += reportSection('Port Scan (nmap)', data.ports);
   md += reportSection('DNS Records', data.dnsRecords);
   md += reportSection('WHOIS / RDAP Lookup', data.whoisLines);
@@ -337,7 +362,7 @@ async function renderMain() {
     return;
   }
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, gfFilterRes, gfSummaryRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -359,6 +384,8 @@ async function renderMain() {
     fetch(`${API}/${t.id}/jsluice_urls`).then(r => r.json()),
     fetch(`${API}/${t.id}/jsluice_secrets`).then(r => r.json()),
     fetch(`${API}/${t.id}/js_params`).then(r => r.json()),
+    fetch(`${API}/${t.id}/gf_filter`).then(r => r.json()),
+    fetch(`${API}/${t.id}/gf_summary`).then(r => r.json()),
   ]);
 
   const subs = subRes.subdomains || [];
@@ -382,6 +409,9 @@ async function renderMain() {
   const jsUrlsFound = jsUrlsRes.urls || [];
   const jsSecretFindings = jsSecretsRes.findings || [];
   const jsParamUrls = jsParamsRes.urls || [];
+  const gfFilterCount = gfFilterRes.counts ? Object.values(gfFilterRes.counts).reduce((a, b) => a + b, 0) : 0;
+  const gfSummaryLines = gfSummaryRes.summary || [];
+  const gfBadges = gfFilterRes.counts ? gfPatternBadges(gfFilterRes.counts) : [];
 
   const reconOpen = uiState.sections.recon;
 
@@ -394,6 +424,7 @@ async function renderMain() {
     { label: 'JS URLs', value: jsUrlsFound.length },
     { label: 'JS secrets', value: (jsSecretsRes.counts ? (jsSecretsRes.counts.total || 0) : 0), danger: true },
     { label: 'JS param URLs', value: jsParamUrls.length },
+    { label: 'GF tagged', value: gfFilterCount },
     { label: 'Open ports', value: ports.length },
     { label: 'Endpoints', value: endpoints.length },
     { label: 'DNS records', value: dnsRecords.length },
@@ -536,6 +567,28 @@ async function renderMain() {
       disabledReason: !jsUrlsRes.ran && !katanaRes.ran ? 'Run "jsluice URLs" or "Web Crawler (katana)" first' : null
     }),
     toolCardHTML({
+      key: 'gffilter',
+      title: 'GF Parameter Filtering',
+      description: 'Industry-standard gf CLI + Gf-Patterns - tags the all_params.txt worklist into vulnerability categories (xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext) by parameter name / extension. Counts shown below as badges. Passive, zero traffic.',
+      note: `Saved to targets/${t.id}/gf_<pattern>.txt · requires gf + Gf-Patterns in ~/.gf`,
+      statusText: statusFor(gfFilterRes.ran, gfFilterCount, 'tagged URLs'),
+      updatedAt: gfFilterRes.updated_at,
+      items: gfFilterRes.matches || [],
+      badges: gfBadges,
+      disabledReason: !jsParamsRes.ran && !paramsRes.ran ? 'Run "JS Parameter Collector" or "Parameter Collector" first' : null
+    }),
+    toolCardHTML({
+      key: 'gfsummary',
+      title: 'GF Summary Report',
+      description: 'One-glance report across every gf_<pattern>.txt file - per-pattern match counts and which categories to triage first (rce/sqli/xss). Passive, zero traffic - run GF Parameter Filtering first.',
+      note: `Saved to targets/${t.id}/gf_summary.txt`,
+      statusText: statusFor(gfSummaryRes.ran, gfSummaryRes.total || 0, 'URLs tagged'),
+      updatedAt: gfSummaryRes.updated_at,
+      items: gfSummaryLines,
+      badges: gfSummaryRes.counts ? gfPatternBadges(gfSummaryRes.counts) : [],
+      disabledReason: !jsParamsRes.ran && !paramsRes.ran ? 'Run the worklist collectors first' : null
+    }),
+    toolCardHTML({
       key: 'endpoints',
       title: 'Directory / Endpoint Discovery',
       description: 'Checks a built-in path list PLUS real historical paths pulled from the Wayback Machine results (run that tool first for better coverage). Active - sends requests to the target.',
@@ -672,7 +725,7 @@ async function renderMain() {
   document.getElementById('export-report-btn').addEventListener('click', () => {
     downloadReport(t, {
       subs, subfinderSubs, liveHosts, httpxSplit, katanaUrls, jsFiles,
-      jsUrlsFound, jsSecretFindings, jsParamUrls,
+      jsUrlsFound, jsSecretFindings, jsParamUrls, gfTagged: gfFilterRes.matches || [], gfSummary: gfSummaryLines,
       ports, dnsRecords, whoisLines, endpoints,
       waybackUrls, uroUrls, urldedupeUrls, urlPatterns, gfMatches, paramUrls,
       techLines, xssFindings
@@ -688,6 +741,8 @@ async function renderMain() {
   wireToolCard('jsurls', jsUrlsFound, () => runTool({ key: 'jsurls', endpoint: 'jsluice_urls', t }));
   wireToolCard('jssecrets', jsSecretFindings, () => runTool({ key: 'jssecrets', endpoint: 'jsluice_secrets', t }));
   wireToolCard('jsparams', jsParamUrls, () => runTool({ key: 'jsparams', endpoint: 'js_params', t }));
+  wireToolCard('gffilter', gfFilterRes.matches || [], () => runTool({ key: 'gffilter', endpoint: 'gf_filter', t }));
+  wireToolCard('gfsummary', gfSummaryLines, () => runTool({ key: 'gfsummary', endpoint: 'gf_summary', t }));
   wireToolCard('portscan', ports, () => runTool({ key: 'portscan', endpoint: 'portscan', t }));
   wireToolCard('endpoints', endpoints, () => runTool({ key: 'endpoints', endpoint: 'endpoints', t }));
   wireToolCard('dns', dnsRecords, () => runTool({ key: 'dns', endpoint: 'dns', t }));
