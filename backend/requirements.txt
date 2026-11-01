@@ -10,6 +10,8 @@
 #     go install -v github.com/projectdiscovery/katana/cmd/katana@latest
 #   - jsluice (Bishop Fox)
 #     go install github.com/BishopFox/jsluice/cmd/jsluice@latest
+#   - wafw00f - NOTE: a PYTHON pip package (pip install wafw00f), unlike
+#     the Go tools above - pip install --upgrade wafw00f
 #   - nmap
 #     apt install nmap   /   brew install nmap   /   https://nmap.org/download
 #   - urldedupe (ameenmaali)

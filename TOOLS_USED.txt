@@ -272,6 +272,41 @@ Recon Framework - Tools / APIs Used Per Module
    Exposed via GET/POST /api/targets/<id>/gf_summary so the frontend
      renders the counts as colored badges without reading files.
 
+
+24) WAF Detection (wafw00f)
+   File: backend/modules/recon/waf_detect.py
+   Type: ACTIVE (sends a handful of crafted requests to each live host)
+   Tool used:
+     - wafw00f (EnableSecurity) - Python/pip package, unlike the Go tools
+       https://github.com/EnableSecurity/wafw00f
+       install: pip install wafw00f
+   Command: wafw00f -i <temp url list> -o <target_path>/waf_results.json -f json
+     (wafw00f reads targets from a file with -i; -o + -f json request its
+     structured output. The scan runs ONCE - the text outputs are derived
+     from that JSON instead of re-scanning for a second format.)
+   Reads: live_200.txt (module 16) preferred, live_hosts.txt (module 15)
+     as fallback (httpx annotations stripped, bare URLs only)
+   Purpose: fingerprints the WAF in front of each host - Cloudflare,
+     Akamai, AWS WAF, Imperva, generic - so active testing knows which
+     hosts to treat with care.
+   Output:
+     waf_results.json  - wafw00f's raw records (url, detected,
+       firewall, manufacturer)
+     waf_results.txt   - "url | waf" per host
+     waf_summary.txt   - "URL | WAF | Yes/No" table + domain header
+   Return: {detected, not_detected, wafs_found: [..], unreachable: n} -
+     hosts with no result vs. input are flagged as unreachable.
+
+25) WAF Filter (split by WAF presence)
+   File: backend/modules/recon/waf_filter.py
+   Type: PASSIVE, zero network calls (re-reads waf_summary.txt, module 24)
+   Method: parses "URL | WAF | Yes/No" rows (malformed rows tolerated)
+   Output:
+     hosts_with_waf.txt - WAF-protected: treat with care during active
+       testing, they may block probes - prioritize less
+     hosts_no_waf.txt   - unfiltered: safe-ish for the XSS Prober and
+       future vuln_scan modules
+
 Core backend stack (not recon-specific):
    - Flask        (web framework / API routes)
    - requests     (HTTP client, used by most modules above)

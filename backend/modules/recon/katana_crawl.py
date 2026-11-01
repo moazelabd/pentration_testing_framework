@@ -86,6 +86,7 @@ def run(domain: str, target_path: str) -> dict:
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
                                      encoding="utf-8") as tf:
         tf.write("\n".join(urls))
+        tf.flush()  # defensive; katana runs after the with-block closes the file
         temp_input = tf.name
 
     try:

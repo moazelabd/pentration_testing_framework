@@ -13,7 +13,8 @@ let uiState = {
     dns: false, whois: false, techinfo: false, wayback: false, uro: false,
     urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
     katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
-    gffilter: false, gfsummary: false
+    gffilter: false, gfsummary: false,
+    wafdetect: false, waffilter: false
   }
 };
 
@@ -26,7 +27,8 @@ function resetUiState() {
       dns: false, whois: false, techinfo: false, wayback: false, uro: false,
       urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
       katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
-      gffilter: false, gfsummary: false
+      gffilter: false, gfsummary: false,
+      wafdetect: false, waffilter: false
     }
   };
 }
@@ -40,6 +42,8 @@ const RUN_ALL_ORDER = [
   { key: 'subdomains', endpoint: 'subdomains' },
   { key: 'httpxlive', endpoint: 'httpx_live' },
   { key: 'httpxfilter', endpoint: 'httpx_filter' },
+  { key: 'wafdetect', endpoint: 'waf' },
+  { key: 'waffilter', endpoint: 'waf_filter' },
   { key: 'katana', endpoint: 'katana' },
   { key: 'jsextract', endpoint: 'js_extractor' },
   { key: 'jsurls', endpoint: 'jsluice_urls' },
@@ -313,6 +317,9 @@ function buildReportMarkdown(t, data) {
   md += reportSection('Subdomain Enumeration (subfinder)', data.subfinderSubs);
   md += reportSection('Live Host Probe (httpx)', data.liveHosts);
   md += reportSection('Live Host Status Split', data.httpxSplit);
+  md += reportSection('WAF Detection (wafw00f)', data.wafRows);
+  md += reportSection('WAF Split - WAF-protected', data.wafWith);
+  md += reportSection('WAF Split - No WAF', data.wafWithout);
   md += reportSection('Web Crawl (katana)', data.katanaUrls);
   md += reportSection('JS Files Extracted', data.jsFiles);
   md += reportSection('JS URLs (jsluice)', data.jsUrlsFound);
@@ -362,7 +369,7 @@ async function renderMain() {
     return;
   }
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, gfFilterRes, gfSummaryRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, gfFilterRes, gfSummaryRes, wafRes, wafFilterRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -386,6 +393,8 @@ async function renderMain() {
     fetch(`${API}/${t.id}/js_params`).then(r => r.json()),
     fetch(`${API}/${t.id}/gf_filter`).then(r => r.json()),
     fetch(`${API}/${t.id}/gf_summary`).then(r => r.json()),
+    fetch(`${API}/${t.id}/waf`).then(r => r.json()),
+    fetch(`${API}/${t.id}/waf_filter`).then(r => r.json()),
   ]);
 
   const subs = subRes.subdomains || [];
@@ -412,6 +421,13 @@ async function renderMain() {
   const gfFilterCount = gfFilterRes.counts ? Object.values(gfFilterRes.counts).reduce((a, b) => a + b, 0) : 0;
   const gfSummaryLines = gfSummaryRes.summary || [];
   const gfBadges = gfFilterRes.counts ? gfPatternBadges(gfFilterRes.counts) : [];
+  const wafRows = wafRes.rows || [];
+  const wafStatusText = wafRes.ran
+    ? `${wafRes.detected || 0} host(s) behind WAF${(wafRes.wafs_found || []).length ? ': ' + wafRes.wafs_found.join(', ') : ''} · ${wafRes.not_detected || 0} without WAF`
+    : null;
+  const wafSplitText = wafFilterRes.ran
+    ? `${wafFilterRes.with_waf_count || 0} with WAF · ${wafFilterRes.no_waf_count || 0} no WAF`
+    : null;
 
   const reconOpen = uiState.sections.recon;
 
@@ -419,6 +435,7 @@ async function renderMain() {
     { label: 'Subdomains', value: subs.length },
     { label: 'Subfinder', value: subfinderSubs.length },
     { label: 'Live hosts', value: liveHosts.length },
+    { label: 'WAF-protected', value: wafRes.detected || 0 },
     { label: 'Crawled URLs', value: katanaUrls.length },
     { label: 'JS files', value: jsFiles.length },
     { label: 'JS URLs', value: jsUrlsFound.length },
@@ -516,6 +533,26 @@ async function renderMain() {
   ].join(''));
 
   const contentGroup = toolGroupHTML('Content & URL Analysis', [
+    toolCardHTML({
+      key: 'wafdetect',
+      title: 'WAF Detection (wafw00f)',
+      description: 'Industry-standard wafw00f CLI - sends crafted requests to each live host and fingerprints the WAF in front of it (Cloudflare, Akamai, AWS WAF, Imperva, generic...). Know your walls before active testing. Active - probes the target\u2019s hosts.',
+      note: `Saved to targets/${t.id}/waf_summary.txt (raw JSON: waf_results.json) · requires wafw00f (pip install wafw00f)`,
+      statusText: wafStatusText || statusFor(wafRes.ran, wafRows.length, 'hosts checked'),
+      updatedAt: wafRes.updated_at,
+      items: wafRows,
+      disabledReason: !httpxLiveRes.ran ? 'Run "Live Host Probe (httpx)" first' : null
+    }),
+    toolCardHTML({
+      key: 'waffilter',
+      title: 'WAF Filter (Split by WAF Presence)',
+      description: 'Splits the WAF results into hosts_with_waf.txt (handle with care) and hosts_no_waf.txt (safe-ish for active testing - no firewall shielding them). Passive, zero traffic - run WAF Detection first.',
+      note: `Saved to targets/${t.id}/hosts_with_waf.txt + hosts_no_waf.txt`,
+      statusText: wafSplitText || statusFor(wafFilterRes.ran, wafRows.length, 'hosts split'),
+      updatedAt: wafFilterRes.updated_at,
+      items: wafFilterRes.ran ? (wafFilterRes.with_waf_count ? wafFilterRes.with_waf : wafFilterRes.no_waf) : [],
+      disabledReason: !wafRes.ran ? 'Run "WAF Detection (wafw00f)" first' : null
+    }),
     toolCardHTML({
       key: 'katana',
       title: 'Web Crawler (katana)',
@@ -724,7 +761,9 @@ async function renderMain() {
 
   document.getElementById('export-report-btn').addEventListener('click', () => {
     downloadReport(t, {
-      subs, subfinderSubs, liveHosts, httpxSplit, katanaUrls, jsFiles,
+      subs, subfinderSubs, liveHosts, httpxSplit, wafRows,
+      wafWith: wafFilterRes.with_waf || [], wafWithout: wafFilterRes.no_waf || [],
+      katanaUrls, jsFiles,
       jsUrlsFound, jsSecretFindings, jsParamUrls, gfTagged: gfFilterRes.matches || [], gfSummary: gfSummaryLines,
       ports, dnsRecords, whoisLines, endpoints,
       waybackUrls, uroUrls, urldedupeUrls, urlPatterns, gfMatches, paramUrls,
@@ -736,6 +775,8 @@ async function renderMain() {
   wireToolCard('subfinder', subfinderSubs, () => runTool({ key: 'subfinder', endpoint: 'subfinder', t }));
   wireToolCard('httpxlive', liveHosts, () => runTool({ key: 'httpxlive', endpoint: 'httpx_live', t }));
   wireToolCard('httpxfilter', httpxSplit, () => runTool({ key: 'httpxfilter', endpoint: 'httpx_filter', t }));
+  wireToolCard('wafdetect', wafRows, () => runTool({ key: 'wafdetect', endpoint: 'waf', t }));
+  wireToolCard('waffilter', wafFilterRes.ran ? (wafFilterRes.with_waf_count ? wafFilterRes.with_waf : wafFilterRes.no_waf) : [], () => runTool({ key: 'waffilter', endpoint: 'waf_filter', t }));
   wireToolCard('katana', katanaUrls, () => runTool({ key: 'katana', endpoint: 'katana', t }));
   wireToolCard('jsextract', jsFiles, () => runTool({ key: 'jsextract', endpoint: 'js_extractor', t }));
   wireToolCard('jsurls', jsUrlsFound, () => runTool({ key: 'jsurls', endpoint: 'jsluice_urls', t }));

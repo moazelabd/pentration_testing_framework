@@ -22,7 +22,8 @@ from modules.recon import (
     katana_crawl, param_collector, portscan,
     subfinder_enum, subdomains_all_in_one as subdomains,
     tech_fingerprint, url_pattern_filter, urldedupe_filter,
-    uro_filter, wayback_urls, whois_lookup, xss_prober,
+    uro_filter, waf_detect, waf_filter, wayback_urls, whois_lookup,
+    xss_prober,
 )
 
 app = Flask(__name__, static_folder=storage.FRONTEND_DIR, static_url_path="")
@@ -573,6 +574,48 @@ def run_gf_summary_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(gf_summary.run(domain, target_path))
+
+
+# ---------- recon: WAF detection (industry-standard wafw00f) ----------
+
+@app.route("/api/targets/<target_id>/waf", methods=["GET"])
+def get_waf(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = waf_detect.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "waf_summary.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/waf", methods=["POST"])
+def run_waf_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(waf_detect.run(domain, target_path))
+
+
+# ---------- recon: WAF presence splitter ----------
+
+@app.route("/api/targets/<target_id>/waf_filter", methods=["GET"])
+def get_waf_filter(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = waf_filter.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "hosts_with_waf.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/waf_filter", methods=["POST"])
+def run_waf_filter_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(waf_filter.run(domain, target_path))
 
 
 if __name__ == "__main__":

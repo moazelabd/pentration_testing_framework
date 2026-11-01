@@ -49,6 +49,7 @@ the UI disables a tool's Run button until its prerequisite has run:
 
 ```
 Subfinder (+ Subdomain Enumeration) -> Live Host Probe (httpx) -> Live Host Filter -> Web Crawler (katana) -> JS File Extractor -> jsluice (urls/secrets) -> JS Parameter Collector
+                       \-> WAF Detection (wafw00f) -> WAF Filter
 Wayback Machine URLs -> URL Cleaner (uro)   -> URL Pattern Filter -> XSS Reflection Prober
                      -> URL Dedupe (urldedupe) -> Pattern Match (gf) -> Parameter Collector
                      \-> Directory / Endpoint Discovery
@@ -63,7 +64,8 @@ and **Active Testing** (Tech Fingerprint, XSS Prober).
 
 ## External CLI tools (optional but recommended)
 
-The new industry-standard modules need the Go binaries on your PATH:
+The new industry-standard modules need these binaries on your PATH.
+Most are Go tools; **wafw00f is a pip package**:
 
 ```bash
 go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
@@ -74,6 +76,7 @@ go install -v github.com/ameenmaali/urldedupe@latest
 go install -v github.com/tomnomnom/gf@latest
 git clone https://github.com/1ndianl33t/Gf-Patterns
 cp Gf-Patterns/*.json ~/.gf/    # gf reads patterns directly from ~/.gf
+pip install wafw00f
 ```
 
 nmap stays a separate package install (`apt install nmap`). If a CLI tool
@@ -95,6 +98,8 @@ the rest of the pipeline keeps working.
 | JS Parameter Collector | passive | Merges jsluice + katana + existing params into all_params.txt (input for gf / active testing) |
 | GF Parameter Filtering | passive | Industry-standard `gf` + Gf-Patterns - tags the all_params worklist per category (gf_<pattern>.txt), counts as badges |
 | GF Summary Report | passive | Per-pattern count report (gf_summary.txt) with priority-review note |
+| WAF Detection (wafw00f) | active | Industry-standard `wafw00f` CLI (pip package) - fingerprints Cloudflare/Akamai/AWS WAF etc. per live host |
+| WAF Filter (WAF presence split) | passive | Splits hosts into hosts_with_waf.txt (careful) / hosts_no_waf.txt (safe for active testing) |
 | Port Scan (nmap) | active | Top 100 TCP ports. **Requires nmap installed separately** - [nmap.org](https://nmap.org/download.html) / `brew install nmap` / `apt install nmap` |
 | Directory / Endpoint Discovery | active | Built-in path list + real paths from Wayback results |
 | DNS Records | mostly passive | A/AAAA/MX/NS/TXT/CNAME/SOA + zone-transfer (AXFR) attempt |
@@ -150,6 +155,8 @@ button is also just a placeholder for now.
 | GET/POST | `/api/targets/<id>/gf` | Pattern Match (gf) |
 | GET/POST | `/api/targets/<id>/gf_filter` | GF Parameter Filtering (all_params) |
 | GET/POST | `/api/targets/<id>/gf_summary` | GF Summary Report |
+| GET/POST | `/api/targets/<id>/waf` | WAF Detection (wafw00f) |
+| GET/POST | `/api/targets/<id>/waf_filter` | WAF Filter (presence split) |
 | GET/POST | `/api/targets/<id>/all_params` | Parameter Collector |
 | GET/POST | `/api/targets/<id>/urlpatterns` | URL Pattern Filter |
 | GET/POST | `/api/targets/<id>/xssprobe` | XSS Reflection Prober |
