@@ -48,7 +48,7 @@ Most tools run independently. The dependent ones build chains, in order -
 the UI disables a tool's Run button until its prerequisite has run:
 
 ```
-Subfinder (+ Subdomain Enumeration) -> Live Host Probe (httpx) -> Live Host Filter -> Web Crawler (katana) -> JS File Extractor
+Subfinder (+ Subdomain Enumeration) -> Live Host Probe (httpx) -> Live Host Filter -> Web Crawler (katana) -> JS File Extractor -> jsluice (urls/secrets) -> JS Parameter Collector
 Wayback Machine URLs -> URL Cleaner (uro)   -> URL Pattern Filter -> XSS Reflection Prober
                      -> URL Dedupe (urldedupe) -> Pattern Match (gf) -> Parameter Collector
                      \-> Directory / Endpoint Discovery
@@ -69,6 +69,7 @@ The new industry-standard modules need the Go binaries on your PATH:
 go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+go install github.com/BishopFox/jsluice/cmd/jsluice@latest
 go install -v github.com/ameenmaali/urldedupe@latest
 go install -v github.com/tomnomnom/gf@latest
 git clone https://github.com/1ndianl33t/Gf-Patterns ~/.gf/patterns   # gf pattern set
@@ -88,6 +89,9 @@ the rest of the pipeline keeps working.
 | Live Host Filter (403/404 Split) | passive | Splits live_hosts.txt into live_<code>.txt files for per-status triage |
 | Web Crawler (katana) | active | Industry-standard `katana` CLI - depth-3 crawl of live 200 hosts, extracts URLs/forms/JS endpoints (-jc). Needs katana on your PATH |
 | JS File Extractor | passive | Keeps the .js URLs (incl. .js?query) from katana output into js_files.txt |
+| JS URLs (jsluice) | active-ish | `jsluice urls -I` (Bishop Fox, tree-sitter) - real fetch/redirect/API URLs + params from JS, not regex |
+| JS Secrets (jsluice) | active-ish | `jsluice secrets` - AWS/GCP/GitHub/Firebase tokens and keys leaked in JS, per-finding severity summary |
+| JS Parameter Collector | passive | Merges jsluice + katana + existing params into all_params.txt (input for gf / active testing) |
 | Port Scan (nmap) | active | Top 100 TCP ports. **Requires nmap installed separately** - [nmap.org](https://nmap.org/download.html) / `brew install nmap` / `apt install nmap` |
 | Directory / Endpoint Discovery | active | Built-in path list + real paths from Wayback results |
 | DNS Records | mostly passive | A/AAAA/MX/NS/TXT/CNAME/SOA + zone-transfer (AXFR) attempt |
@@ -130,6 +134,9 @@ button is also just a placeholder for now.
 | GET/POST | `/api/targets/<id>/httpx_filter` | Live Host Filter (status split) |
 | GET/POST | `/api/targets/<id>/katana` | Web Crawler (katana) |
 | GET/POST | `/api/targets/<id>/js_extractor` | JS File Extractor |
+| GET/POST | `/api/targets/<id>/jsluice_urls` | JS URLs + parameters (jsluice) |
+| GET/POST | `/api/targets/<id>/jsluice_secrets` | JS secrets (jsluice) |
+| GET/POST | `/api/targets/<id>/js_params` | JS Parameter Collector |
 | GET/POST | `/api/targets/<id>/portscan` | Port Scan |
 | GET/POST | `/api/targets/<id>/endpoints` | Endpoint Discovery |
 | GET/POST | `/api/targets/<id>/dns` | DNS Records |

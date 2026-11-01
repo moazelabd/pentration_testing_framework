@@ -17,7 +17,8 @@ from flask import Flask, jsonify, request, send_from_directory
 import storage
 from modules.recon import (
     dns_records, endpoints, gf_extractor, httpx_filter, httpx_live,
-    js_extractor, katana_crawl, param_collector, portscan,
+    js_param_collector, js_extractor, jsluice_secrets, jsluice_urls,
+    katana_crawl, param_collector, portscan,
     subfinder_enum, subdomains_all_in_one as subdomains,
     tech_fingerprint, url_pattern_filter, urldedupe_filter,
     uro_filter, wayback_urls, whois_lookup, xss_prober,
@@ -464,6 +465,69 @@ def run_js_extractor_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(js_extractor.run(domain, target_path))
+
+
+# ---------- recon: jsluice JS analysis (urls mode) ----------
+
+@app.route("/api/targets/<target_id>/jsluice_urls", methods=["GET"])
+def get_jsluice_urls(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = jsluice_urls.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "jsluice_urls.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/jsluice_urls", methods=["POST"])
+def run_jsluice_urls_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(jsluice_urls.run(domain, target_path))
+
+
+# ---------- recon: jsluice JS analysis (secrets mode) ----------
+
+@app.route("/api/targets/<target_id>/jsluice_secrets", methods=["GET"])
+def get_jsluice_secrets(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = jsluice_secrets.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "jsluice_secrets_summary.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/jsluice_secrets", methods=["POST"])
+def run_jsluice_secrets_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(jsluice_secrets.run(domain, target_path))
+
+
+# ---------- recon: JS parameter aggregation for the next phase ----------
+
+@app.route("/api/targets/<target_id>/js_params", methods=["GET"])
+def get_js_params(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = js_param_collector.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "all_params.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/js_params", methods=["POST"])
+def run_js_params_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(js_param_collector.run(domain, target_path))
 
 
 if __name__ == "__main__":

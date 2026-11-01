@@ -12,7 +12,7 @@ let uiState = {
     portscan: false, endpoints: false,
     dns: false, whois: false, techinfo: false, wayback: false, uro: false,
     urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
-    katana: false, jsextract: false
+    katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false
   }
 };
 
@@ -24,7 +24,7 @@ function resetUiState() {
       portscan: false, endpoints: false,
       dns: false, whois: false, techinfo: false, wayback: false, uro: false,
       urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
-      katana: false, jsextract: false
+      katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false
     }
   };
 }
@@ -40,6 +40,9 @@ const RUN_ALL_ORDER = [
   { key: 'httpxfilter', endpoint: 'httpx_filter' },
   { key: 'katana', endpoint: 'katana' },
   { key: 'jsextract', endpoint: 'js_extractor' },
+  { key: 'jsurls', endpoint: 'jsluice_urls' },
+  { key: 'jssecrets', endpoint: 'jsluice_secrets' },
+  { key: 'jsparams', endpoint: 'js_params' },
   { key: 'portscan', endpoint: 'portscan' },
   { key: 'dns', endpoint: 'dns' },
   { key: 'whois', endpoint: 'whois' },
@@ -289,6 +292,9 @@ function buildReportMarkdown(t, data) {
   md += reportSection('Live Host Status Split', data.httpxSplit);
   md += reportSection('Web Crawl (katana)', data.katanaUrls);
   md += reportSection('JS Files Extracted', data.jsFiles);
+  md += reportSection('JS URLs (jsluice)', data.jsUrlsFound);
+  md += reportSection('JS Secrets (jsluice)', data.jsSecretFindings);
+  md += reportSection('JS Parameter Worklist (all_params)', data.jsParamUrls);
   md += reportSection('Port Scan (nmap)', data.ports);
   md += reportSection('DNS Records', data.dnsRecords);
   md += reportSection('WHOIS / RDAP Lookup', data.whoisLines);
@@ -331,7 +337,7 @@ async function renderMain() {
     return;
   }
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -350,6 +356,9 @@ async function renderMain() {
     fetch(`${API}/${t.id}/httpx_filter`).then(r => r.json()),
     fetch(`${API}/${t.id}/katana`).then(r => r.json()),
     fetch(`${API}/${t.id}/js_extractor`).then(r => r.json()),
+    fetch(`${API}/${t.id}/jsluice_urls`).then(r => r.json()),
+    fetch(`${API}/${t.id}/jsluice_secrets`).then(r => r.json()),
+    fetch(`${API}/${t.id}/js_params`).then(r => r.json()),
   ]);
 
   const subs = subRes.subdomains || [];
@@ -370,6 +379,9 @@ async function renderMain() {
   const httpxSplit = httpxFilterRes.summary || [];
   const katanaUrls = katanaRes.urls || [];
   const jsFiles = jsRes.js_files || [];
+  const jsUrlsFound = jsUrlsRes.urls || [];
+  const jsSecretFindings = jsSecretsRes.findings || [];
+  const jsParamUrls = jsParamsRes.urls || [];
 
   const reconOpen = uiState.sections.recon;
 
@@ -379,6 +391,9 @@ async function renderMain() {
     { label: 'Live hosts', value: liveHosts.length },
     { label: 'Crawled URLs', value: katanaUrls.length },
     { label: 'JS files', value: jsFiles.length },
+    { label: 'JS URLs', value: jsUrlsFound.length },
+    { label: 'JS secrets', value: (jsSecretsRes.counts ? (jsSecretsRes.counts.total || 0) : 0), danger: true },
+    { label: 'JS param URLs', value: jsParamUrls.length },
     { label: 'Open ports', value: ports.length },
     { label: 'Endpoints', value: endpoints.length },
     { label: 'DNS records', value: dnsRecords.length },
@@ -489,6 +504,36 @@ async function renderMain() {
       updatedAt: jsRes.updated_at,
       items: jsFiles,
       disabledReason: !katanaRes.ran ? 'Run "Web Crawler (katana)" first' : null
+    }),
+    toolCardHTML({
+      key: 'jsurls',
+      title: 'jsluice URLs (JS Endpoints & Parameters)',
+      description: 'Industry-standard jsluice (Bishop Fox) - parses JS with tree-sitter and pulls URLs actually used in code: fetch() calls, redirects, API paths, query parameters. -I ignores bare string literals to cut noise. Fetches each JS file - active-ish.',
+      note: `Saved to targets/${t.id}/jsluice_urls.txt (raw JSON: jsluice_urls.json) · requires jsluice on PATH`,
+      statusText: statusFor(jsUrlsRes.ran, jsUrlsFound.length, 'URLs extracted'),
+      updatedAt: jsUrlsRes.updated_at,
+      items: jsUrlsFound,
+      disabledReason: !jsRes.ran ? 'Run "JS File Extractor" first' : null
+    }),
+    toolCardHTML({
+      key: 'jssecrets',
+      title: 'jsluice Secrets (Keys, Tokens, Credentials)',
+      description: 'jsluice secrets mode - built-in extractors flag leaked AWS/GCP keys, GitHub tokens, Firebase configs and more inside the JS files. HIGH-priority surface: confirm manually before reporting.',
+      note: `Saved to targets/${t.id}/jsluice_secrets_summary.txt (raw JSON: jsluice_secrets.json)`,
+      statusText: statusFor(jsSecretsRes.ran, (jsSecretsRes.counts ? (jsSecretsRes.counts.total || 0) : 0), 'secret finding(s)'),
+      updatedAt: jsSecretsRes.updated_at,
+      items: jsSecretFindings,
+      disabledReason: !jsRes.ran ? 'Run "JS File Extractor" first' : null
+    }),
+    toolCardHTML({
+      key: 'jsparams',
+      title: 'JS Parameter Collector (all_params)',
+      description: 'Aggregates every parameterized URL from jsluice results, katana output and the previously collected list into one deduplicated worklist (all_params.txt) for the gf / active-testing phase. Passive, zero traffic.',
+      note: `Saved to targets/${t.id}/all_params.txt`,
+      statusText: statusFor(jsParamsRes.ran, jsParamUrls.length, 'parameterized URLs'),
+      updatedAt: jsParamsRes.updated_at,
+      items: jsParamUrls,
+      disabledReason: !jsUrlsRes.ran && !katanaRes.ran ? 'Run "jsluice URLs" or "Web Crawler (katana)" first' : null
     }),
     toolCardHTML({
       key: 'endpoints',
@@ -627,6 +672,7 @@ async function renderMain() {
   document.getElementById('export-report-btn').addEventListener('click', () => {
     downloadReport(t, {
       subs, subfinderSubs, liveHosts, httpxSplit, katanaUrls, jsFiles,
+      jsUrlsFound, jsSecretFindings, jsParamUrls,
       ports, dnsRecords, whoisLines, endpoints,
       waybackUrls, uroUrls, urldedupeUrls, urlPatterns, gfMatches, paramUrls,
       techLines, xssFindings
@@ -639,6 +685,9 @@ async function renderMain() {
   wireToolCard('httpxfilter', httpxSplit, () => runTool({ key: 'httpxfilter', endpoint: 'httpx_filter', t }));
   wireToolCard('katana', katanaUrls, () => runTool({ key: 'katana', endpoint: 'katana', t }));
   wireToolCard('jsextract', jsFiles, () => runTool({ key: 'jsextract', endpoint: 'js_extractor', t }));
+  wireToolCard('jsurls', jsUrlsFound, () => runTool({ key: 'jsurls', endpoint: 'jsluice_urls', t }));
+  wireToolCard('jssecrets', jsSecretFindings, () => runTool({ key: 'jssecrets', endpoint: 'jsluice_secrets', t }));
+  wireToolCard('jsparams', jsParamUrls, () => runTool({ key: 'jsparams', endpoint: 'js_params', t }));
   wireToolCard('portscan', ports, () => runTool({ key: 'portscan', endpoint: 'portscan', t }));
   wireToolCard('endpoints', endpoints, () => runTool({ key: 'endpoints', endpoint: 'endpoints', t }));
   wireToolCard('dns', dnsRecords, () => runTool({ key: 'dns', endpoint: 'dns', t }));

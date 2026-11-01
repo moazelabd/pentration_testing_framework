@@ -178,6 +178,59 @@ Recon Framework - Tools / APIs Used Per Module
      routes, parameter names and dead code pointing at removed panels.
      Feeds the active-testing phase alongside all_params.txt (module 14).
 
+
+19) JavaScript URLs, Paths & Parameters (jsluice urls mode)
+   File: backend/modules/recon/jsluice_urls.py
+   Type: ACTIVE-ISH (jsluice itself fetches each JS file listed as a URL)
+   Tool used:
+     - jsluice (Bishop Fox, tree-sitter based - NOT regex)
+       https://github.com/BishopFox/jsluice
+       install: go install github.com/BishopFox/jsluice/cmd/jsluice@latest
+   Command: jsluice urls -I   (JS file/URL list piped in via stdin,
+            as per jsluice's documented usage:
+            `find . -name '*.js' | jsluice urls -I`)
+     -I / --ignore-strings: skips bare string literals so results focus
+       on URLs actually used in code: fetch() calls, document.location
+       assignments, window.open(), XHR / jquery patterns.
+   Reads: js_files.txt (module 18)
+   Output:
+     jsluice_urls.json  -> raw JSON lines per match (url, queryParams,
+                           method, type, filename, source)
+     jsluice_urls.txt   -> just the url field, one per line,
+                           deduplicated + sorted
+   Note: concatenated expressions become EXTR placeholders - the
+     parameter NAMES are still valid targets for the active phase.
+
+20) JavaScript Secrets (jsluice secrets mode)
+   File: backend/modules/recon/jsluice_secrets.py
+   Type: ACTIVE-ISH (jsluice itself fetches each JS file listed as a URL)
+   Tool used:
+     - jsluice (Bishop Fox) - same binary as module 19, `secrets` mode:
+       built-in extractors flag AWS keys, GCP keys, GitHub tokens,
+       Firebase configs, and other sensitive data. Custom extra
+       patterns are supported via jsluice's -p/--patterns JSON flag
+       (wired up later if needed).
+   Command: jsluice secrets   (JS file/URL list piped in via stdin)
+   Reads: js_files.txt (module 18)
+   Output:
+     jsluice_secrets.json          -> raw JSON lines (kind, severity,
+                                      filename, data, context)
+     jsluice_secrets_summary.txt   -> one line per finding:
+        "[AWSAccessKeyID] [high] found in https://host/app.js"
+   Note: findings are SIGNALS - verify each one manually before
+     reporting. Never rely on a filename-only triage here.
+
+21) JS Parameter Collector
+   File: backend/modules/recon/js_param_collector.py
+   Type: PASSIVE, zero network calls (pure file merge)
+   Reads: jsluice_urls.txt (module 19) + katana_urls.txt (module 17)
+     + existing all_params.txt (module 14's output is preserved so the
+     two collectors COMPOSE instead of overwriting each other)
+   Method: keeps only lines containing '?', deduplicates, writes the
+     consolidated worklist back to all_params.txt
+   Output: all_params.txt - shared input for gf (module 13), the XSS
+     Prober (module 10) and the future vuln_scan phase.
+
 Core backend stack (not recon-specific):
    - Flask        (web framework / API routes)
    - requests     (HTTP client, used by most modules above)
