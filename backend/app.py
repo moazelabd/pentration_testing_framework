@@ -17,7 +17,7 @@ from flask import Flask, jsonify, request, send_from_directory
 import storage
 from modules.recon import (
     dns_records, endpoints, gf_extractor, httpx_filter, httpx_live,
-    param_collector, portscan,
+    js_extractor, katana_crawl, param_collector, portscan,
     subfinder_enum, subdomains_all_in_one as subdomains,
     tech_fingerprint, url_pattern_filter, urldedupe_filter,
     uro_filter, wayback_urls, whois_lookup, xss_prober,
@@ -422,6 +422,48 @@ def run_httpx_filter_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(httpx_filter.run(domain, target_path))
+
+
+# ---------- recon: katana live-host web crawler ----------
+
+@app.route("/api/targets/<target_id>/katana", methods=["GET"])
+def get_katana(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = katana_crawl.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "katana_urls.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/katana", methods=["POST"])
+def run_katana_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(katana_crawl.run(domain, target_path))
+
+
+# ---------- recon: JS file extraction from katana output ----------
+
+@app.route("/api/targets/<target_id>/js_extractor", methods=["GET"])
+def get_js_extractor(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = js_extractor.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "js_files.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/js_extractor", methods=["POST"])
+def run_js_extractor_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(js_extractor.run(domain, target_path))
 
 
 if __name__ == "__main__":

@@ -11,7 +11,8 @@ let uiState = {
     subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
     portscan: false, endpoints: false,
     dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-    urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false
+    urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
+    katana: false, jsextract: false
   }
 };
 
@@ -22,20 +23,23 @@ function resetUiState() {
       subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
       portscan: false, endpoints: false,
       dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-      urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false
+      urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
+      katana: false, jsextract: false
     }
   };
 }
 
-// Dependency-safe order for "Run All" - independent tools first, then the
-// enumeration -> live-probe -> URL chain:
+// Dependency-safe order for "Run All":
 //   (subfinder | subdomains) -> httpx live probe -> status split ->
+//   katana crawl -> JS extraction -> (portscan/dns/...) rest ->
 //   wayback -> (uro | urldedupe) -> gf/allparams -> URL Pattern Filter -> XSS Prober
 const RUN_ALL_ORDER = [
   { key: 'subfinder', endpoint: 'subfinder' },
   { key: 'subdomains', endpoint: 'subdomains' },
   { key: 'httpxlive', endpoint: 'httpx_live' },
   { key: 'httpxfilter', endpoint: 'httpx_filter' },
+  { key: 'katana', endpoint: 'katana' },
+  { key: 'jsextract', endpoint: 'js_extractor' },
   { key: 'portscan', endpoint: 'portscan' },
   { key: 'dns', endpoint: 'dns' },
   { key: 'whois', endpoint: 'whois' },
@@ -283,6 +287,8 @@ function buildReportMarkdown(t, data) {
   md += reportSection('Subdomain Enumeration (subfinder)', data.subfinderSubs);
   md += reportSection('Live Host Probe (httpx)', data.liveHosts);
   md += reportSection('Live Host Status Split', data.httpxSplit);
+  md += reportSection('Web Crawl (katana)', data.katanaUrls);
+  md += reportSection('JS Files Extracted', data.jsFiles);
   md += reportSection('Port Scan (nmap)', data.ports);
   md += reportSection('DNS Records', data.dnsRecords);
   md += reportSection('WHOIS / RDAP Lookup', data.whoisLines);
@@ -325,7 +331,7 @@ async function renderMain() {
     return;
   }
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -342,6 +348,8 @@ async function renderMain() {
     fetch(`${API}/${t.id}/all_params`).then(r => r.json()),
     fetch(`${API}/${t.id}/httpx_live`).then(r => r.json()),
     fetch(`${API}/${t.id}/httpx_filter`).then(r => r.json()),
+    fetch(`${API}/${t.id}/katana`).then(r => r.json()),
+    fetch(`${API}/${t.id}/js_extractor`).then(r => r.json()),
   ]);
 
   const subs = subRes.subdomains || [];
@@ -360,6 +368,8 @@ async function renderMain() {
   const paramUrls = paramsRes.urls || [];
   const liveHosts = httpxLiveRes.hosts || [];
   const httpxSplit = httpxFilterRes.summary || [];
+  const katanaUrls = katanaRes.urls || [];
+  const jsFiles = jsRes.js_files || [];
 
   const reconOpen = uiState.sections.recon;
 
@@ -367,6 +377,8 @@ async function renderMain() {
     { label: 'Subdomains', value: subs.length },
     { label: 'Subfinder', value: subfinderSubs.length },
     { label: 'Live hosts', value: liveHosts.length },
+    { label: 'Crawled URLs', value: katanaUrls.length },
+    { label: 'JS files', value: jsFiles.length },
     { label: 'Open ports', value: ports.length },
     { label: 'Endpoints', value: endpoints.length },
     { label: 'DNS records', value: dnsRecords.length },
@@ -458,6 +470,26 @@ async function renderMain() {
   ].join(''));
 
   const contentGroup = toolGroupHTML('Content & URL Analysis', [
+    toolCardHTML({
+      key: 'katana',
+      title: 'Web Crawler (katana)',
+      description: 'Industry-standard katana CLI - crawls every live 200 host at depth 3 and extracts all discovered URLs, forms and JS-embedded endpoints (-jc). Active - sends crawl requests to the target.',
+      note: `Saved to targets/${t.id}/katana_urls.txt · requires katana installed on this machine`,
+      statusText: statusFor(katanaRes.ran, katanaUrls.length, 'URLs discovered'),
+      updatedAt: katanaRes.updated_at,
+      items: katanaUrls,
+      disabledReason: !httpxLiveRes.ran ? 'Run "Live Host Probe (httpx)" first' : null
+    }),
+    toolCardHTML({
+      key: 'jsextract',
+      title: 'JS File Extractor',
+      description: 'Pulls the pure .js file URLs (including .js?query=) out of the katana results - JS files can hide API routes, parameter names and dead-code panels. Passive, zero traffic - run the Katana Crawler first.',
+      note: `Saved to targets/${t.id}/js_files.txt`,
+      statusText: statusFor(jsRes.ran, jsFiles.length, 'JS files found'),
+      updatedAt: jsRes.updated_at,
+      items: jsFiles,
+      disabledReason: !katanaRes.ran ? 'Run "Web Crawler (katana)" first' : null
+    }),
     toolCardHTML({
       key: 'endpoints',
       title: 'Directory / Endpoint Discovery',
@@ -594,7 +626,8 @@ async function renderMain() {
 
   document.getElementById('export-report-btn').addEventListener('click', () => {
     downloadReport(t, {
-      subs, subfinderSubs, liveHosts, httpxSplit, ports, dnsRecords, whoisLines, endpoints,
+      subs, subfinderSubs, liveHosts, httpxSplit, katanaUrls, jsFiles,
+      ports, dnsRecords, whoisLines, endpoints,
       waybackUrls, uroUrls, urldedupeUrls, urlPatterns, gfMatches, paramUrls,
       techLines, xssFindings
     });
@@ -604,6 +637,8 @@ async function renderMain() {
   wireToolCard('subfinder', subfinderSubs, () => runTool({ key: 'subfinder', endpoint: 'subfinder', t }));
   wireToolCard('httpxlive', liveHosts, () => runTool({ key: 'httpxlive', endpoint: 'httpx_live', t }));
   wireToolCard('httpxfilter', httpxSplit, () => runTool({ key: 'httpxfilter', endpoint: 'httpx_filter', t }));
+  wireToolCard('katana', katanaUrls, () => runTool({ key: 'katana', endpoint: 'katana', t }));
+  wireToolCard('jsextract', jsFiles, () => runTool({ key: 'jsextract', endpoint: 'js_extractor', t }));
   wireToolCard('portscan', ports, () => runTool({ key: 'portscan', endpoint: 'portscan', t }));
   wireToolCard('endpoints', endpoints, () => runTool({ key: 'endpoints', endpoint: 'endpoints', t }));
   wireToolCard('dns', dnsRecords, () => runTool({ key: 'dns', endpoint: 'dns', t }));

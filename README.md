@@ -48,7 +48,7 @@ Most tools run independently. The dependent ones build chains, in order -
 the UI disables a tool's Run button until its prerequisite has run:
 
 ```
-Subfinder (+ Subdomain Enumeration) -> Live Host Probe (httpx) -> Live Host Filter
+Subfinder (+ Subdomain Enumeration) -> Live Host Probe (httpx) -> Live Host Filter -> Web Crawler (katana) -> JS File Extractor
 Wayback Machine URLs -> URL Cleaner (uro)   -> URL Pattern Filter -> XSS Reflection Prober
                      -> URL Dedupe (urldedupe) -> Pattern Match (gf) -> Parameter Collector
                      \-> Directory / Endpoint Discovery
@@ -68,6 +68,7 @@ The new industry-standard modules need the Go binaries on your PATH:
 ```bash
 go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+go install -v github.com/projectdiscovery/katana/cmd/katana@latest
 go install -v github.com/ameenmaali/urldedupe@latest
 go install -v github.com/tomnomnom/gf@latest
 git clone https://github.com/1ndianl33t/Gf-Patterns ~/.gf/patterns   # gf pattern set
@@ -85,6 +86,8 @@ the rest of the pipeline keeps working.
 | Subdomain Enumeration (subfinder) | passive | Industry-standard `subfinder` CLI - needs subfinder on your PATH |
 | Live Host Probe (httpx) | active | Industry-standard `httpx` CLI - probes every subdomain, keeps 200/301/302/401/403/404 with titles + tech. Needs httpx on your PATH |
 | Live Host Filter (403/404 Split) | passive | Splits live_hosts.txt into live_<code>.txt files for per-status triage |
+| Web Crawler (katana) | active | Industry-standard `katana` CLI - depth-3 crawl of live 200 hosts, extracts URLs/forms/JS endpoints (-jc). Needs katana on your PATH |
+| JS File Extractor | passive | Keeps the .js URLs (incl. .js?query) from katana output into js_files.txt |
 | Port Scan (nmap) | active | Top 100 TCP ports. **Requires nmap installed separately** - [nmap.org](https://nmap.org/download.html) / `brew install nmap` / `apt install nmap` |
 | Directory / Endpoint Discovery | active | Built-in path list + real paths from Wayback results |
 | DNS Records | mostly passive | A/AAAA/MX/NS/TXT/CNAME/SOA + zone-transfer (AXFR) attempt |
@@ -125,6 +128,8 @@ button is also just a placeholder for now.
 | GET/POST | `/api/targets/<id>/subfinder` | Subdomain Enumeration (subfinder) |
 | GET/POST | `/api/targets/<id>/httpx_live` | Live Host Probe (httpx) |
 | GET/POST | `/api/targets/<id>/httpx_filter` | Live Host Filter (status split) |
+| GET/POST | `/api/targets/<id>/katana` | Web Crawler (katana) |
+| GET/POST | `/api/targets/<id>/js_extractor` | JS File Extractor |
 | GET/POST | `/api/targets/<id>/portscan` | Port Scan |
 | GET/POST | `/api/targets/<id>/endpoints` | Endpoint Discovery |
 | GET/POST | `/api/targets/<id>/dns` | DNS Records |

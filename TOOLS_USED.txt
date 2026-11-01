@@ -152,6 +152,32 @@ Recon Framework - Tools / APIs Used Per Module
    Note: the 401/403 files double as a direct-access shortlist - those
      hosts exist but are access-restricted, usually worth a manual look.
 
+
+17) Web Crawling (katana)
+   File: backend/modules/recon/katana_crawl.py
+   Type: ACTIVE (crawls the target's live web servers)
+   Tool used:
+     - katana (industry-standard Go CLI, ProjectDiscovery)
+       https://github.com/projectdiscovery/katana
+       install: go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+   Command: katana -list <temp-input> -silent -jc -d 3 -o
+            <target_path>/katana_urls.txt
+     -jc  extract + crawl endpoints embedded in JavaScript files
+     -d 3 depth cap so crawling cannot recurse forever
+   Reads: live_200.txt (module 16) preferred, live_hosts.txt (module 15)
+     as fallback (httpx annotations ' [200] [Title]' stripped, URLs only)
+   Output: katana_urls.txt - discovered URLs, form entries and
+     JS-crawl endpoints, one per line, deduplicated + sorted
+
+18) JavaScript File Extractor
+   File: backend/modules/recon/js_extractor.py
+   Type: PASSIVE, zero network calls (re-reads katana_urls.txt from module 17)
+   Method: keeps only lines ending in .js (incl. .min.js) or carrying a
+     query string after .js (.js?ver=...)
+   Output: js_files.txt - the JS attack surface: files can hide API
+     routes, parameter names and dead code pointing at removed panels.
+     Feeds the active-testing phase alongside all_params.txt (module 14).
+
 Core backend stack (not recon-specific):
    - Flask        (web framework / API routes)
    - requests     (HTTP client, used by most modules above)
