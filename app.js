@@ -1,0 +1,1001 @@
+const API = '/api/targets';
+
+let targets = [];
+let activeId = null;
+
+// UI collapse/expand state - kept in memory so it survives re-renders
+// (e.g. after running a tool) instead of resetting every time.
+let uiState = {
+  sections: { recon: false },
+  tools: {
+    subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
+    portscan: false, endpoints: false,
+    dns: false, whois: false, techinfo: false, wayback: false, uro: false,
+    urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
+    katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
+    gffilter: false, gfsummary: false,
+    wafdetect: false, waffilter: false
+  }
+};
+
+function resetUiState() {
+  uiState = {
+    sections: { recon: false },
+    tools: {
+      subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
+      portscan: false, endpoints: false,
+      dns: false, whois: false, techinfo: false, wayback: false, uro: false,
+      urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
+      katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
+      gffilter: false, gfsummary: false,
+      wafdetect: false, waffilter: false
+    }
+  };
+}
+
+// Dependency-safe order for "Run All":
+//   (subfinder | subdomains) -> httpx live probe -> status split ->
+//   katana crawl -> JS extraction -> (portscan/dns/...) rest ->
+//   wayback -> (uro | urldedupe) -> gf/allparams -> URL Pattern Filter -> XSS Prober
+const RUN_ALL_ORDER = [
+  { key: 'subfinder', endpoint: 'subfinder' },
+  { key: 'subdomains', endpoint: 'subdomains' },
+  { key: 'httpxlive', endpoint: 'httpx_live' },
+  { key: 'httpxfilter', endpoint: 'httpx_filter' },
+  { key: 'wafdetect', endpoint: 'waf' },
+  { key: 'waffilter', endpoint: 'waf_filter' },
+  { key: 'katana', endpoint: 'katana' },
+  { key: 'jsextract', endpoint: 'js_extractor' },
+  { key: 'jsurls', endpoint: 'jsluice_urls' },
+  { key: 'jssecrets', endpoint: 'jsluice_secrets' },
+  { key: 'jsparams', endpoint: 'js_params' },
+  { key: 'gffilter', endpoint: 'gf_filter' },
+  { key: 'gfsummary', endpoint: 'gf_summary' },
+  { key: 'portscan', endpoint: 'portscan' },
+  { key: 'dns', endpoint: 'dns' },
+  { key: 'whois', endpoint: 'whois' },
+  { key: 'techinfo', endpoint: 'techinfo' },
+  { key: 'wayback', endpoint: 'wayback' },
+  { key: 'urldedupe', endpoint: 'urldedupe' },
+  { key: 'uro', endpoint: 'uro' },
+  { key: 'endpoints', endpoint: 'endpoints' },
+  { key: 'urlpatterns', endpoint: 'urlpatterns' },
+  { key: 'gf', endpoint: 'gf' },
+  { key: 'allparams', endpoint: 'all_params' },
+  { key: 'xssprobe', endpoint: 'xssprobe' },
+];
+
+async function fetchTargets() {
+  const res = await fetch(API);
+  targets = await res.json();
+}
+
+function renderSidebar() {
+  const list = document.getElementById('target-list');
+  if (targets.length === 0) {
+    list.innerHTML = '<div id="empty-targets">No targets yet.<br>Click + Add Target to start.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  targets.forEach(t => {
+    const el = document.createElement('div');
+    el.className = 'target-item' + (t.id === activeId ? ' active' : '');
+    const badge = t.xss_findings > 0 ? `<span class="t-badge" title="${t.xss_findings} unescaped XSS finding(s)"></span>` : '';
+    el.innerHTML = `${badge}<span class="t-name">${t.name}</span><span class="t-remove" data-id="${t.id}">✕</span>`;
+    el.addEventListener('click', (e) => {
+      if (e.target.classList.contains('t-remove')) return;
+      activeId = t.id;
+      resetUiState();
+      renderSidebar();
+      renderMain();
+    });
+    el.querySelector('.t-remove').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (confirm(`Delete target "${t.name}"? Its folder on disk will be removed too.`)) {
+        await fetch(`${API}/${t.id}`, { method: 'DELETE' });
+        if (activeId === t.id) activeId = null;
+        await fetchTargets();
+        renderSidebar();
+        renderMain();
+      }
+    });
+    list.appendChild(el);
+  });
+}
+
+// ---- generic helpers shared by every recon tool card ----
+
+function toggleBlock(id, open) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = open ? '' : 'none';
+}
+function toggleChevron(headId, open) {
+  const head = document.getElementById(headId);
+  if (!head) return;
+  const chevron = head.querySelector('.chevron');
+  if (chevron) chevron.classList.toggle('open', open);
+}
+
+// Category tiers for URL Pattern Filter lines, e.g. "https://...\t(xss, redirect)"
+const CRITICAL_TAGS = ['rce', 'sqli'];
+const HIGH_TAGS = ['xss', 'ssrf', 'lfi'];
+const MEDIUM_TAGS = ['idor', 'debug_logic'];
+const LOW_TAGS = ['redirect', 'interesting_ext'];
+
+// Classifies a result line so dangerous/noteworthy findings stand out from
+// routine output instead of every line looking the same shade of gray.
+function severityClass(line) {
+  if (/UNESCAPED|SUCCEEDED/.test(line)) return 'sev-danger';
+  if (/escaped \(likely safe\)|refused\/failed/.test(line)) return 'sev-safe';
+
+  // URL Pattern Filter lines end with a tag list like "(xss, redirect)" -
+  // color by the worst category present on that line.
+  const tagMatch = line.match(/\(([a-z_, ]+)\)\s*$/i);
+  if (tagMatch) {
+    const tags = tagMatch[1].split(',').map(s => s.trim().toLowerCase());
+    if (tags.some(t => CRITICAL_TAGS.includes(t))) return 'sev-critical';
+    if (tags.some(t => HIGH_TAGS.includes(t))) return 'sev-high';
+    if (tags.some(t => MEDIUM_TAGS.includes(t))) return 'sev-medium';
+    if (tags.some(t => LOW_TAGS.includes(t))) return 'sev-low';
+  }
+  return '';
+}
+
+// Turns an ISO timestamp (or null) into a short "Xm ago" style string for
+// display next to a tool's status.
+function formatRelativeTime(iso) {
+  if (!iso) return null;
+  const diffSec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diffSec < 5) return 'just now';
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return `${Math.floor(diffHr / 24)}d ago`;
+}
+
+// Only show the per-card filter box once there's enough output to
+// actually need filtering.
+const SEARCH_THRESHOLD = 8;
+
+// Turns gf_filter counts into colored badges for the card header -
+// danger = categories worth triaging first (see CRITICAL_TAGS above).
+function gfPatternBadges(counts) {
+  const DANGER = ['rce', 'sqli'];
+  const WARN = ['xss', 'ssrf', 'lfi'];
+  const LABELS = { xss: 'XSS', sqli: 'SQLi', ssrf: 'SSRF', lfi: 'LFI', rce: 'RCE',
+                   idor: 'IDOR', redirect: 'Redirect', debug_logic: 'Debug',
+                   interesting_ext: 'IntExt' };
+  return Object.entries(counts)
+    .filter(([p, v]) => v > 0 && LABELS[p])
+    .sort((a, b) => b[1] - a[1])
+    .map(([p, v]) => ({ label: LABELS[p], value: v,
+                        cls: DANGER.includes(p) ? 'danger' : WARN.includes(p) ? 'warn' : 'info' }));
+}
+
+function toolCardHTML({ key, title, description, note, statusText, items, disabledReason, updatedAt, badges }) {
+  const open = uiState.tools[key];
+  const disabledAttr = disabledReason ? 'disabled' : '';
+  const titleAttr = disabledReason ? ` title="${disabledReason}"` : '';
+  const displayedStatus = disabledReason
+    ? `<span class="tool-status locked">${disabledReason}</span>`
+    : statusText;
+  const relTime = formatRelativeTime(updatedAt);
+  const fullNote = relTime ? `${note} · Last run: ${relTime}` : note;
+  const showSearch = items.length > SEARCH_THRESHOLD;
+  const badgesHTML = (badges || [])
+    .map(b => `<span class="gf-badge gf-badge-${b.cls}">${b.label}: ${b.value}</span>`)
+    .join(' ');
+  return `
+    <div class="tool-card">
+      <div class="tool-card-head" id="tool-head-${key}">
+        <span class="chevron ${open ? 'open' : ''}">&#9656;</span>
+        <div class="tool-info">
+          <h3>${title}</h3>
+          ${badgesHTML ? `<div class="gf-badges">${badgesHTML}</div>` : ''}
+          <p>${description}</p>
+        </div>
+      </div>
+      <div class="tool-body" id="tool-body-${key}" style="${open ? '' : 'display:none;'}">
+        <div class="tool-run-row">
+          <button class="run-btn" id="run-${key}" ${disabledAttr}${titleAttr}>Run</button>
+          <div class="tool-status" id="status-${key}">${displayedStatus}</div>
+        </div>
+        <div id="results-wrap-${key}" style="${items.length > 0 ? '' : 'display:none;'}">
+          ${showSearch ? `<input type="text" class="result-search" id="search-${key}" placeholder="Filter ${items.length} results...">` : ''}
+          <div class="result-list" id="results-${key}">${items.map(s => `<div class="${severityClass(s)}">${s}</div>`).join('')}</div>
+          <div class="tool-actions">
+            <button class="ghost-btn" id="copy-${key}">Copy all</button>
+          </div>
+        </div>
+        <p class="tool-note">${fullNote}</p>
+      </div>
+    </div>`;
+}
+
+function toolGroupHTML(title, cardsHtml) {
+  return `<div class="tool-group"><h4 class="tool-group-title">${title}</h4>${cardsHtml}</div>`;
+}
+
+function wireToolCard(key, items, runFn) {
+  document.getElementById(`tool-head-${key}`).addEventListener('click', () => {
+    uiState.tools[key] = !uiState.tools[key];
+    toggleBlock(`tool-body-${key}`, uiState.tools[key]);
+    toggleChevron(`tool-head-${key}`, uiState.tools[key]);
+  });
+  document.getElementById(`run-${key}`).addEventListener('click', (e) => {
+    e.stopPropagation();
+    runFn();
+  });
+  const cpBtn = document.getElementById(`copy-${key}`);
+  if (cpBtn) cpBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(items.join('\n'));
+    const original = cpBtn.textContent;
+    cpBtn.textContent = 'Copied!';
+    setTimeout(() => { cpBtn.textContent = original; }, 1200);
+  });
+  const searchEl = document.getElementById(`search-${key}`);
+  if (searchEl) {
+    searchEl.addEventListener('click', (e) => e.stopPropagation());
+    searchEl.addEventListener('input', () => {
+      const q = searchEl.value.toLowerCase();
+      document.querySelectorAll(`#results-${key} > div`).forEach(div => {
+        div.style.display = div.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+  }
+}
+
+function statusFor(ran, count, foundLabel, notRunLabel) {
+  if (!ran) return notRunLabel || 'Not run yet.';
+  if (count > 0) return `Last result: ${count} ${foundLabel}`;
+  return `Last run found 0 ${foundLabel}.`;
+}
+
+async function runTool({ key, endpoint, method, resultKey, t, onDone }) {
+  const statusEl = document.getElementById(`status-${key}`);
+  const btn = document.getElementById(`run-${key}`);
+  btn.disabled = true;
+  statusEl.className = 'tool-status';
+  statusEl.textContent = 'Running... this can take a little while.';
+
+  try {
+    const res = await fetch(`${API}/${t.id}/${endpoint}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+
+    uiState.sections.recon = true;
+    uiState.tools[key] = true;
+    renderMain();
+  } catch (err) {
+    statusEl.className = 'tool-status err';
+    statusEl.textContent = 'Error: ' + err.message;
+    btn.disabled = false;
+  }
+}
+
+async function runAll(t) {
+  const btn = document.getElementById('run-all-btn');
+  const statusEl = document.getElementById('run-all-status');
+  if (!btn || !statusEl) return;
+  btn.disabled = true;
+  const failures = [];
+
+  for (let i = 0; i < RUN_ALL_ORDER.length; i++) {
+    const step = RUN_ALL_ORDER[i];
+    statusEl.textContent = `Running ${step.key}... (${i + 1}/${RUN_ALL_ORDER.length})`;
+    try {
+      const res = await fetch(`${API}/${t.id}/${step.endpoint}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) failures.push(`${step.key}: ${data.error || 'error'}`);
+    } catch (err) {
+      failures.push(`${step.key}: ${err.message}`);
+    }
+  }
+
+  statusEl.textContent = failures.length
+    ? `Done, with ${failures.length} issue(s) - ${failures.join(' | ')}`
+    : 'All tools finished.';
+  btn.disabled = false;
+  uiState.sections.recon = true;
+  renderMain();
+}
+
+function reportSection(title, items) {
+  const body = items.length
+    ? items.map(i => `- ${i}`).join('\n')
+    : '_Not run, or no results yet._';
+  return `## ${title}\n\n${body}\n\n`;
+}
+
+function buildReportMarkdown(t, data) {
+  let md = `# Recon Report - ${t.name}\n\n`;
+  md += `**Target:** ${t.domain}\n**Generated:** ${new Date().toISOString()}\n\n---\n\n`;
+  md += reportSection('Subdomain Enumeration (all-in-one)', data.subs);
+  md += reportSection('Subdomain Enumeration (subfinder)', data.subfinderSubs);
+  md += reportSection('Live Host Probe (httpx)', data.liveHosts);
+  md += reportSection('Live Host Status Split', data.httpxSplit);
+  md += reportSection('WAF Detection (wafw00f)', data.wafRows);
+  md += reportSection('WAF Split - WAF-protected', data.wafWith);
+  md += reportSection('WAF Split - No WAF', data.wafWithout);
+  md += reportSection('Web Crawl (katana)', data.katanaUrls);
+  md += reportSection('JS Files Extracted', data.jsFiles);
+  md += reportSection('JS URLs (jsluice)', data.jsUrlsFound);
+  md += reportSection('JS Secrets (jsluice)', data.jsSecretFindings);
+  md += reportSection('JS Parameter Worklist (all_params)', data.jsParamUrls);
+  md += reportSection('GF Filtering (all_params)', data.gfTagged);
+  md += reportSection('GF Summary', data.gfSummary);
+  md += reportSection('Port Scan (nmap)', data.ports);
+  md += reportSection('DNS Records', data.dnsRecords);
+  md += reportSection('WHOIS / RDAP Lookup', data.whoisLines);
+  md += reportSection('Directory / Endpoint Discovery', data.endpoints);
+  md += reportSection('Wayback Machine URLs', data.waybackUrls);
+  md += reportSection('URL Cleaner (uro)', data.uroUrls);
+  md += reportSection('URL Dedupe (urldedupe)', data.urldedupeUrls);
+  md += reportSection('URL Pattern Filter (gf-patterns)', data.urlPatterns);
+  md += reportSection('Pattern Match (gf)', data.gfMatches);
+  md += reportSection('Parameter Collector (all_params)', data.paramUrls);
+  md += reportSection('Tech Fingerprint + TLS', data.techLines);
+  md += reportSection('XSS Reflection Prober (dalfox-inspired)', data.xssFindings);
+  return md;
+}
+
+function downloadReport(t, data) {
+  const md = buildReportMarkdown(t, data);
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${t.id}-recon-report.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+
+
+// ---------- Monitoring page (landing option, beside Framework) ----------
+const MON = '/api/monitoring';
+function monEsc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+window.monTogglePw = function(btn){
+  const span = btn.parentElement.querySelector('.pw-val');
+  if (!span) return;
+  const hidden = span.classList.toggle('pw-blur');
+  span.classList.toggle('pw-show', !hidden);
+  btn.textContent = hidden ? 'Show' : 'Hide';
+};
+function monRenderEmpty(msg){
+  document.getElementById('mon-results').innerHTML = `<tr><td colspan="5" style="color:var(--text-faint);padding:14px">${monEsc(msg)}</td></tr>`;
+  document.getElementById('mon-count').textContent = '';
+}
+function monRenderRows(results){
+  const body = document.getElementById('mon-results');
+  document.getElementById('mon-count').textContent = results.length + ' result(s)';
+  if (!results.length) { monRenderEmpty('No matches. Try another email, username, domain or URL.'); return; }
+  body.innerHTML = results.slice(0, 200).map(e => {
+    const pw = e.password || '';
+    const pwCell = pw ? `<span class="pw-val pw-blur">${monEsc(pw)}</span><button class="pw-eye" onclick="monTogglePw(this)" title="Show / hide password">Show</button>` : '—';
+    return `<tr><td>${monEsc((e.date||'').slice(0,10))}</td><td>${monEsc(e.url||e.domain||'—')}</td><td>${e.email ? monEsc(e.email) : monEsc(e.username||'—')}</td><td>${pwCell}</td><td>${monEsc(e.source||'—')}</td></tr>`;
+  }).join('');
+}
+async function monRefresh(){
+  try { const d = await (await fetch(`${MON}/status`)).json(); document.getElementById('mon-total').textContent = d.logs || 0; } catch (e) { /* server not up yet */ }
+}
+async function monSearch(){
+  const q = document.getElementById('mon-q').value.trim();
+  if (!q) { monRenderEmpty('Search for something to see results — nothing is listed until you search.'); return; }
+  const field = document.getElementById('mon-field').value;
+  const d = await (await fetch(`${MON}/search?q=${encodeURIComponent(q)}&field=${encodeURIComponent(field)}`)).json();
+  monRenderRows(d.results || []);
+}
+async function monIngestFiles(files){
+  let total = 0;
+  for (const f of files) {
+    const text = await f.text();
+    const res = await fetch(`${MON}/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, source: f.name }) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'import failed');
+    total += d.added || 0;
+  }
+  return total;
+}
+async function monAfterImport(added){
+  document.getElementById('mon-ingest-status').textContent = 'Indexed ' + added + ' new entries.';
+  await monRefresh();
+  monSearch();
+}
+document.getElementById('mon-search-btn').addEventListener('click', monSearch);
+document.getElementById('mon-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') monSearch(); });
+document.getElementById('mon-clear-btn').addEventListener('click', () => {
+  document.getElementById('mon-q').value = '';
+  monRenderEmpty('Search for something to see results — nothing is listed until you search.');
+});
+document.getElementById('mon-link-btn').addEventListener('click', async () => {
+  const url = document.getElementById('mon-link-url').value.trim();
+  if (!url) return alert('Paste a log link first.');
+  try {
+    const res = await fetch(`${MON}/ingest-url`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'fetch failed');
+    document.getElementById('mon-link-status').textContent = 'Indexed ' + d.added + ' new entries from that link.';
+    await monRefresh();
+    alert('Indexed ' + d.added + ' new entries from that link. Now search for something.');
+  } catch (err) { alert('Link failed: ' + err.message); }
+});
+document.getElementById('mon-paste-btn').addEventListener('click', async () => {
+  const text = document.getElementById('mon-paste').value;
+  if (!text.trim()) return alert('Paste some log lines first.');
+  try {
+    const res = await fetch(`${MON}/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, source: 'pasted lines' }) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'import failed');
+    document.getElementById('mon-paste').value = '';
+    await monAfterImport(d.added || 0);
+    alert('Indexed ' + (d.added || 0) + ' new entries.');
+  } catch (err) { alert('Import failed: ' + err.message); }
+});
+// Drop zone: highlight + import, and stop the browser opening dropped files.
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+const monDrop = document.getElementById('mon-drop');
+monDrop.addEventListener('click', (e) => { if (e.target.id !== 'mon-file') document.getElementById('mon-file').click(); });
+monDrop.addEventListener('dragenter', (e) => { e.preventDefault(); monDrop.classList.add('drag'); });
+monDrop.addEventListener('dragover', (e) => { e.preventDefault(); monDrop.classList.add('drag'); });
+monDrop.addEventListener('dragleave', () => monDrop.classList.remove('drag'));
+monDrop.addEventListener('drop', async (e) => {
+  e.preventDefault(); e.stopPropagation(); monDrop.classList.remove('drag');
+  try { const added = await monIngestFiles(e.dataTransfer.files); await monAfterImport(added); alert('Indexed ' + added + ' new entries.'); }
+  catch (err) { alert('Import failed: ' + err.message); }
+});
+document.getElementById('mon-choose-btn').addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('mon-file').click(); });
+document.getElementById('mon-file').addEventListener('change', async (e) => {
+  try { const added = await monIngestFiles(e.target.files); await monAfterImport(added); alert('Indexed ' + added + ' new entries.'); }
+  catch (err) { alert('Import failed: ' + err.message); }
+  e.target.value = '';
+});
+
+// ---- main render ----
+
+async function renderMain() {
+  const container = document.getElementById('main-inner');
+  const t = targets.find(x => x.id === activeId);
+  if (!t) {
+    container.innerHTML = `
+      <div id="empty-state">
+        <div class="glyph">&gt;_</div>
+        <p>Select a target on the left, or add a new one to start recon.</p>
+      </div>`;
+    return;
+  }
+
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, gfFilterRes, gfSummaryRes, wafRes, wafFilterRes] = await Promise.all([
+    fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
+    fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
+    fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
+    fetch(`${API}/${t.id}/dns`).then(r => r.json()),
+    fetch(`${API}/${t.id}/whois`).then(r => r.json()),
+    fetch(`${API}/${t.id}/techinfo`).then(r => r.json()),
+    fetch(`${API}/${t.id}/wayback`).then(r => r.json()),
+    fetch(`${API}/${t.id}/uro`).then(r => r.json()),
+    fetch(`${API}/${t.id}/urlpatterns`).then(r => r.json()),
+    fetch(`${API}/${t.id}/xssprobe`).then(r => r.json()),
+    fetch(`${API}/${t.id}/subfinder`).then(r => r.json()),
+    fetch(`${API}/${t.id}/urldedupe`).then(r => r.json()),
+    fetch(`${API}/${t.id}/gf`).then(r => r.json()),
+    fetch(`${API}/${t.id}/all_params`).then(r => r.json()),
+    fetch(`${API}/${t.id}/httpx_live`).then(r => r.json()),
+    fetch(`${API}/${t.id}/httpx_filter`).then(r => r.json()),
+    fetch(`${API}/${t.id}/katana`).then(r => r.json()),
+    fetch(`${API}/${t.id}/js_extractor`).then(r => r.json()),
+    fetch(`${API}/${t.id}/jsluice_urls`).then(r => r.json()),
+    fetch(`${API}/${t.id}/jsluice_secrets`).then(r => r.json()),
+    fetch(`${API}/${t.id}/js_params`).then(r => r.json()),
+    fetch(`${API}/${t.id}/gf_filter`).then(r => r.json()),
+    fetch(`${API}/${t.id}/gf_summary`).then(r => r.json()),
+    fetch(`${API}/${t.id}/waf`).then(r => r.json()),
+    fetch(`${API}/${t.id}/waf_filter`).then(r => r.json()),
+  ]);
+
+  const subs = subRes.subdomains || [];
+  const ports = portRes.ports || [];
+  const endpoints = endpRes.endpoints || [];
+  const dnsRecords = dnsRes.records || [];
+  const whoisLines = whoisRes.whois || [];
+  const techLines = techRes.techinfo || [];
+  const waybackUrls = waybackRes.urls || [];
+  const uroUrls = uroRes.urls || [];
+  const urlPatterns = urlPatRes.matches || [];
+  const xssFindings = xssRes.findings || [];
+  const subfinderSubs = subfinderRes.subdomains || [];
+  const urldedupeUrls = urldedRes.urls || [];
+  const gfMatches = gfRes.matches || [];
+  const paramUrls = paramsRes.urls || [];
+  const liveHosts = httpxLiveRes.hosts || [];
+  const httpxSplit = httpxFilterRes.summary || [];
+  const katanaUrls = katanaRes.urls || [];
+  const jsFiles = jsRes.js_files || [];
+  const jsUrlsFound = jsUrlsRes.urls || [];
+  const jsSecretFindings = jsSecretsRes.findings || [];
+  const jsParamUrls = jsParamsRes.urls || [];
+  const gfFilterCount = gfFilterRes.counts ? Object.values(gfFilterRes.counts).reduce((a, b) => a + b, 0) : 0;
+  const gfSummaryLines = gfSummaryRes.summary || [];
+  const gfBadges = gfFilterRes.counts ? gfPatternBadges(gfFilterRes.counts) : [];
+  const wafRows = wafRes.rows || [];
+  const wafStatusText = wafRes.ran
+    ? `${wafRes.detected || 0} host(s) behind WAF${(wafRes.wafs_found || []).length ? ': ' + wafRes.wafs_found.join(', ') : ''} · ${wafRes.not_detected || 0} without WAF`
+    : null;
+  const wafSplitText = wafFilterRes.ran
+    ? `${wafFilterRes.with_waf_count || 0} with WAF · ${wafFilterRes.no_waf_count || 0} no WAF`
+    : null;
+
+  const reconOpen = uiState.sections.recon;
+
+  const stats = [
+    { label: 'Subdomains', value: subs.length },
+    { label: 'Subfinder', value: subfinderSubs.length },
+    { label: 'Live hosts', value: liveHosts.length },
+    { label: 'WAF-protected', value: wafRes.detected || 0 },
+    { label: 'Crawled URLs', value: katanaUrls.length },
+    { label: 'JS files', value: jsFiles.length },
+    { label: 'JS URLs', value: jsUrlsFound.length },
+    { label: 'JS secrets', value: (jsSecretsRes.counts ? (jsSecretsRes.counts.total || 0) : 0), danger: true },
+    { label: 'JS param URLs', value: jsParamUrls.length },
+    { label: 'GF tagged', value: gfFilterCount },
+    { label: 'Open ports', value: ports.length },
+    { label: 'Endpoints', value: endpoints.length },
+    { label: 'DNS records', value: dnsRecords.length },
+    { label: 'WHOIS fields', value: whoisLines.length },
+    { label: 'Tech fields', value: techLines.length },
+    { label: 'Wayback URLs', value: waybackUrls.length },
+    { label: 'Clean URLs (uro)', value: uroUrls.length },
+    { label: 'Deduped URLs', value: urldedupeUrls.length },
+    { label: 'Pattern matches', value: urlPatterns.length },
+    { label: 'gf matches', value: gfMatches.length },
+    { label: 'Param URLs', value: paramUrls.length },
+    { label: 'XSS findings', value: xssFindings.length, danger: true },
+  ];
+  const statsBarHTML = `
+    <div class="stats-bar">
+      ${stats.map(s => `
+        <div class="stat-chip${s.danger && s.value > 0 ? ' stat-danger' : ''}">
+          <span class="stat-value">${s.value}</span>
+          <span class="stat-label">${s.label}</span>
+        </div>`).join('')}
+    </div>`;
+
+  const discoveryGroup = toolGroupHTML('Discovery', [
+    toolCardHTML({
+      key: 'subdomains',
+      title: 'Subdomain Enumeration (all-in-one)',
+      description: 'Merges crt.sh, CertSpotter and HackerTarget, de-duplicated - each result is tagged with which source(s) found it. Fully passive, no traffic sent to the target.',
+      note: `Saved to targets/${t.id}/subdomains.txt`,
+      statusText: statusFor(subRes.ran, subs.length, 'subdomains'),
+      updatedAt: subRes.updated_at,
+      items: subs
+    }),
+    toolCardHTML({
+      key: 'subfinder',
+      title: 'Subdomain Enumeration (subfinder)',
+      description: 'Industry-standard subfinder CLI - passive enumeration across certificate logs and other public sources. No traffic sent to the target.',
+      note: `Saved to targets/${t.id}/subfinder.txt · requires subfinder installed on this machine`,
+      statusText: statusFor(subfinderRes.ran, subfinderSubs.length, 'subdomains'),
+      updatedAt: subfinderRes.updated_at,
+      items: subfinderSubs
+    }),
+    toolCardHTML({
+      key: 'httpxlive',
+      title: 'Live Host Probe (httpx)',
+      description: 'Industry-standard httpx CLI - probes every subdomain and keeps all live responses: 200, 301/302 redirects AND 401/403 (restricted) and 404 (interesting), annotated with titles and detected tech. Active - sends HTTP requests to the target\u2019s hosts.',
+      note: `Saved to targets/${t.id}/live_hosts.txt · requires httpx installed on this machine`,
+      statusText: statusFor(httpxLiveRes.ran, liveHosts.length, 'live hosts'),
+      updatedAt: httpxLiveRes.updated_at,
+      items: liveHosts,
+      disabledReason: !subfinderRes.ran && !subRes.ran ? 'Run "Subfinder" or "Subdomain Enumeration" first' : null
+    }),
+    toolCardHTML({
+      key: 'httpxfilter',
+      title: 'Live Host Filter (403/404 Split)',
+      description: 'Splits the httpx results into live_200.txt, live_301/302.txt, live_401.txt, live_403.txt and live_404.txt so each class of live host can be triaged separately. Passive, zero traffic - run the Live Host Probe first.',
+      note: `Saved to targets/${t.id}/live_<code>.txt`,
+      statusText: statusFor(httpxFilterRes.ran, liveHosts.length, 'hosts split'),
+      updatedAt: httpxFilterRes.updated_at,
+      items: httpxSplit,
+      disabledReason: !httpxLiveRes.ran ? 'Run "Live Host Probe (httpx)" first' : null
+    }),
+    toolCardHTML({
+      key: 'portscan',
+      title: 'Port Scan (nmap)',
+      description: 'Fast scan of the top 100 TCP ports via nmap. Active - sends real traffic to the target.',
+      note: `Saved to targets/${t.id}/ports.txt · requires nmap installed on this machine`,
+      statusText: statusFor(portRes.ran, ports.length, 'open ports'),
+      updatedAt: portRes.updated_at,
+      items: ports
+    }),
+    toolCardHTML({
+      key: 'dns',
+      title: 'DNS Records',
+      description: 'Looks up A/AAAA/MX/NS/TXT/CNAME/SOA records and tries a zone transfer (AXFR). Mostly passive - the AXFR attempt talks directly to the target\u2019s nameservers.',
+      note: `Saved to targets/${t.id}/dns_records.txt`,
+      statusText: statusFor(dnsRes.ran, dnsRecords.length, 'records found'),
+      updatedAt: dnsRes.updated_at,
+      items: dnsRecords
+    }),
+    toolCardHTML({
+      key: 'whois',
+      title: 'WHOIS / RDAP Lookup',
+      description: 'Registrar, registration/expiry dates, and nameservers via the public RDAP bootstrap service. Fully passive - no traffic sent to the target.',
+      note: `Saved to targets/${t.id}/whois.txt`,
+      statusText: statusFor(whoisRes.ran, whoisLines.length, 'fields found'),
+      updatedAt: whoisRes.updated_at,
+      items: whoisLines
+    }),
+  ].join(''));
+
+  const contentGroup = toolGroupHTML('Content & URL Analysis', [
+    toolCardHTML({
+      key: 'wafdetect',
+      title: 'WAF Detection (wafw00f)',
+      description: 'Industry-standard wafw00f CLI - sends crafted requests to each live host and fingerprints the WAF in front of it (Cloudflare, Akamai, AWS WAF, Imperva, generic...). Know your walls before active testing. Active - probes the target\u2019s hosts.',
+      note: `Saved to targets/${t.id}/waf_summary.txt (raw JSON: waf_results.json) · requires wafw00f (pip install wafw00f)`,
+      statusText: wafStatusText || statusFor(wafRes.ran, wafRows.length, 'hosts checked'),
+      updatedAt: wafRes.updated_at,
+      items: wafRows,
+      disabledReason: !httpxLiveRes.ran ? 'Run "Live Host Probe (httpx)" first' : null
+    }),
+    toolCardHTML({
+      key: 'waffilter',
+      title: 'WAF Filter (Split by WAF Presence)',
+      description: 'Splits the WAF results into hosts_with_waf.txt (handle with care) and hosts_no_waf.txt (safe-ish for active testing - no firewall shielding them). Passive, zero traffic - run WAF Detection first.',
+      note: `Saved to targets/${t.id}/hosts_with_waf.txt + hosts_no_waf.txt`,
+      statusText: wafSplitText || statusFor(wafFilterRes.ran, wafRows.length, 'hosts split'),
+      updatedAt: wafFilterRes.updated_at,
+      items: wafFilterRes.ran ? (wafFilterRes.with_waf_count ? wafFilterRes.with_waf : wafFilterRes.no_waf) : [],
+      disabledReason: !wafRes.ran ? 'Run "WAF Detection (wafw00f)" first' : null
+    }),
+    toolCardHTML({
+      key: 'katana',
+      title: 'Web Crawler (katana)',
+      description: 'Industry-standard katana CLI - crawls every live 200 host at depth 3 and extracts all discovered URLs, forms and JS-embedded endpoints (-jc). Active - sends crawl requests to the target.',
+      note: `Saved to targets/${t.id}/katana_urls.txt · requires katana installed on this machine`,
+      statusText: statusFor(katanaRes.ran, katanaUrls.length, 'URLs discovered'),
+      updatedAt: katanaRes.updated_at,
+      items: katanaUrls,
+      disabledReason: !httpxLiveRes.ran ? 'Run "Live Host Probe (httpx)" first' : null
+    }),
+    toolCardHTML({
+      key: 'jsextract',
+      title: 'JS File Extractor',
+      description: 'Pulls the pure .js file URLs (including .js?query=) out of the katana results - JS files can hide API routes, parameter names and dead-code panels. Passive, zero traffic - run the Katana Crawler first.',
+      note: `Saved to targets/${t.id}/js_files.txt`,
+      statusText: statusFor(jsRes.ran, jsFiles.length, 'JS files found'),
+      updatedAt: jsRes.updated_at,
+      items: jsFiles,
+      disabledReason: !katanaRes.ran ? 'Run "Web Crawler (katana)" first' : null
+    }),
+    toolCardHTML({
+      key: 'jsurls',
+      title: 'jsluice URLs (JS Endpoints & Parameters)',
+      description: 'Industry-standard jsluice (Bishop Fox) - parses JS with tree-sitter and pulls URLs actually used in code: fetch() calls, redirects, API paths, query parameters. -I ignores bare string literals to cut noise. Fetches each JS file - active-ish.',
+      note: `Saved to targets/${t.id}/jsluice_urls.txt (raw JSON: jsluice_urls.json) · requires jsluice on PATH`,
+      statusText: statusFor(jsUrlsRes.ran, jsUrlsFound.length, 'URLs extracted'),
+      updatedAt: jsUrlsRes.updated_at,
+      items: jsUrlsFound,
+      disabledReason: !jsRes.ran ? 'Run "JS File Extractor" first' : null
+    }),
+    toolCardHTML({
+      key: 'jssecrets',
+      title: 'jsluice Secrets (Keys, Tokens, Credentials)',
+      description: 'jsluice secrets mode - built-in extractors flag leaked AWS/GCP keys, GitHub tokens, Firebase configs and more inside the JS files. HIGH-priority surface: confirm manually before reporting.',
+      note: `Saved to targets/${t.id}/jsluice_secrets_summary.txt (raw JSON: jsluice_secrets.json)`,
+      statusText: statusFor(jsSecretsRes.ran, (jsSecretsRes.counts ? (jsSecretsRes.counts.total || 0) : 0), 'secret finding(s)'),
+      updatedAt: jsSecretsRes.updated_at,
+      items: jsSecretFindings,
+      disabledReason: !jsRes.ran ? 'Run "JS File Extractor" first' : null
+    }),
+    toolCardHTML({
+      key: 'jsparams',
+      title: 'JS Parameter Collector (all_params)',
+      description: 'Aggregates every parameterized URL from jsluice results, katana output and the previously collected list into one deduplicated worklist (all_params.txt) for the gf / active-testing phase. Passive, zero traffic.',
+      note: `Saved to targets/${t.id}/all_params.txt`,
+      statusText: statusFor(jsParamsRes.ran, jsParamUrls.length, 'parameterized URLs'),
+      updatedAt: jsParamsRes.updated_at,
+      items: jsParamUrls,
+      disabledReason: !jsUrlsRes.ran && !katanaRes.ran ? 'Run "jsluice URLs" or "Web Crawler (katana)" first' : null
+    }),
+    toolCardHTML({
+      key: 'gffilter',
+      title: 'GF Parameter Filtering',
+      description: 'Industry-standard gf CLI + Gf-Patterns - tags the all_params.txt worklist into vulnerability categories (xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext) by parameter name / extension. Counts shown below as badges. Passive, zero traffic.',
+      note: `Saved to targets/${t.id}/gf_<pattern>.txt · requires gf + Gf-Patterns in ~/.gf`,
+      statusText: statusFor(gfFilterRes.ran, gfFilterCount, 'tagged URLs'),
+      updatedAt: gfFilterRes.updated_at,
+      items: gfFilterRes.matches || [],
+      badges: gfBadges,
+      disabledReason: !jsParamsRes.ran && !paramsRes.ran ? 'Run "JS Parameter Collector" or "Parameter Collector" first' : null
+    }),
+    toolCardHTML({
+      key: 'gfsummary',
+      title: 'GF Summary Report',
+      description: 'One-glance report across every gf_<pattern>.txt file - per-pattern match counts and which categories to triage first (rce/sqli/xss). Passive, zero traffic - run GF Parameter Filtering first.',
+      note: `Saved to targets/${t.id}/gf_summary.txt`,
+      statusText: statusFor(gfSummaryRes.ran, gfSummaryRes.total || 0, 'URLs tagged'),
+      updatedAt: gfSummaryRes.updated_at,
+      items: gfSummaryLines,
+      badges: gfSummaryRes.counts ? gfPatternBadges(gfSummaryRes.counts) : [],
+      disabledReason: !jsParamsRes.ran && !paramsRes.ran ? 'Run the worklist collectors first' : null
+    }),
+    toolCardHTML({
+      key: 'endpoints',
+      title: 'Directory / Endpoint Discovery',
+      description: 'Checks a built-in path list PLUS real historical paths pulled from the Wayback Machine results (run that tool first for better coverage). Active - sends requests to the target.',
+      note: `Saved to targets/${t.id}/endpoints.txt`,
+      statusText: statusFor(endpRes.ran, endpoints.length, 'endpoints found'),
+      updatedAt: endpRes.updated_at,
+      items: endpoints
+    }),
+    toolCardHTML({
+      key: 'wayback',
+      title: 'Wayback Machine URLs',
+      description: 'Pulls historical URLs for this domain from archive.org - often surfaces old endpoints no longer linked anywhere. Fully passive.',
+      note: `Saved to targets/${t.id}/wayback.txt`,
+      statusText: statusFor(waybackRes.ran, waybackUrls.length, 'URLs found'),
+      updatedAt: waybackRes.updated_at,
+      items: waybackUrls
+    }),
+    toolCardHTML({
+      key: 'uro',
+      title: 'URL Cleaner (uro)',
+      description: 'Drops boring static-asset URLs and collapses near-duplicate URLs (same pattern, different ID/param value) from the Wayback list. Passive, zero traffic - run Wayback Machine first.',
+      note: `Saved to targets/${t.id}/uro_urls.txt`,
+      statusText: statusFor(uroRes.ran, uroUrls.length, 'URLs kept'),
+      updatedAt: uroRes.updated_at,
+      items: uroUrls,
+      disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
+    }),
+    toolCardHTML({
+      key: 'urldedupe',
+      title: 'URL Dedupe (urldedupe)',
+      description: 'Industry-standard urldedupe CLI - collapses near-duplicate URLs from the Wayback list (differing only by parameter values), fast. Passive, zero traffic - run Wayback Machine first.',
+      note: `Saved to targets/${t.id}/urldedupe.txt · requires urldedupe installed on this machine`,
+      statusText: statusFor(urldedRes.ran, urldedupeUrls.length, 'URLs kept'),
+      updatedAt: urldedRes.updated_at,
+      items: urldedupeUrls,
+      disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
+    }),
+    toolCardHTML({
+      key: 'urlpatterns',
+      title: 'URL Pattern Filter (gf-patterns)',
+      description: 'Sorts URLs into categories (xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext) by param name / extension. Uses the uro-cleaned list if available. Passive, zero traffic - run Wayback Machine first.',
+      note: `Saved to targets/${t.id}/url_patterns.txt`,
+      statusText: statusFor(urlPatRes.ran, urlPatterns.length, 'matches found'),
+      updatedAt: urlPatRes.updated_at,
+      items: urlPatterns,
+      disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
+    }),
+    toolCardHTML({
+      key: 'gf',
+      title: 'Pattern Match (gf)',
+      description: 'Industry-standard gf CLI with Gf-Patterns - pulls URLs matching each category (xss, sqli, ssrf, lfi, rce, redirect, idor, debug_logic) into gf_<pattern>.txt files. Runs on the urldedupe output when available, wayback otherwise.',
+      note: `Saved to targets/${t.id}/gf_<pattern>.txt · requires gf + Gf-Patterns installed on this machine`,
+      statusText: statusFor(gfRes.ran, gfMatches.length, 'matches found'),
+      updatedAt: gfRes.updated_at,
+      items: gfMatches,
+      disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
+    }),
+    toolCardHTML({
+      key: 'allparams',
+      title: 'Parameter Collector',
+      description: 'Consolidates every parameterized URL (?id=1, ?page=2, ...) found across Subfinder results and the cleaned URL lists into one worklist (all_params.txt) for the active-testing phase. Passive, zero traffic.',
+      note: `Saved to targets/${t.id}/all_params.txt`,
+      statusText: statusFor(paramsRes.ran, paramUrls.length, 'parameterized URLs'),
+      updatedAt: paramsRes.updated_at,
+      items: paramUrls,
+      disabledReason: !subfinderRes.ran && !waybackRes.ran ? 'Run "Subfinder" or "Wayback Machine URLs" first' : null
+    }),
+  ].join(''));
+
+  const activeGroup = toolGroupHTML('Active Testing', [
+    toolCardHTML({
+      key: 'techinfo',
+      title: 'Tech Fingerprint + TLS',
+      description: 'Reads server headers, a generator meta tag if present, and the TLS certificate (issuer, expiry, SANs). Active - one lightweight request + TLS handshake.',
+      note: `Saved to targets/${t.id}/techinfo.txt`,
+      statusText: statusFor(techRes.ran, techLines.length, 'fields found'),
+      updatedAt: techRes.updated_at,
+      items: techLines
+    }),
+    toolCardHTML({
+      key: 'xssprobe',
+      title: 'XSS Reflection Prober (dalfox-inspired)',
+      description: 'Injects a marker into each param of the "xss"-tagged URLs and checks if it reflects unescaped - a signal, not proof, of reflected XSS. Active - run URL Pattern Filter first.',
+      note: `Saved to targets/${t.id}/xss_probe.txt`,
+      statusText: statusFor(xssRes.ran, xssFindings.length, 'findings'),
+      updatedAt: xssRes.updated_at,
+      items: xssFindings,
+      disabledReason: !urlPatRes.ran ? 'Run "URL Pattern Filter" first' : null
+    }),
+  ].join(''));
+
+  container.innerHTML = `
+    <div class="target-header">
+      <div class="target-header-top">
+        <div>
+          <div class="t-label">TARGET</div>
+          <h2>${t.name}</h2>
+          <div class="t-url">${t.domain}</div>
+        </div>
+        <button id="export-report-btn" class="ghost-btn export-report-btn">Export Report</button>
+      </div>
+    </div>
+
+    ${statsBarHTML}
+
+    <div class="section">
+      <div class="section-header" id="section-recon">
+        <span class="chevron ${reconOpen ? 'open' : ''}">&#9656;</span>
+        <span class="section-title">Recon</span>
+        <span class="section-sub">information gathering</span>
+        <button id="run-all-btn" class="ghost-btn run-all-btn">Run All</button>
+      </div>
+      <div id="run-all-status" class="run-all-status"></div>
+      <div class="section-body" id="section-recon-body" style="${reconOpen ? '' : 'display:none;'}">
+        ${discoveryGroup}
+        ${contentGroup}
+        ${activeGroup}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('section-recon').addEventListener('click', (e) => {
+    if (e.target.id === 'run-all-btn') return;
+    uiState.sections.recon = !uiState.sections.recon;
+    toggleBlock('section-recon-body', uiState.sections.recon);
+    toggleChevron('section-recon', uiState.sections.recon);
+  });
+
+  document.getElementById('run-all-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    runAll(t);
+  });
+
+  document.getElementById('export-report-btn').addEventListener('click', () => {
+    downloadReport(t, {
+      subs, subfinderSubs, liveHosts, httpxSplit, wafRows,
+      wafWith: wafFilterRes.with_waf || [], wafWithout: wafFilterRes.no_waf || [],
+      katanaUrls, jsFiles,
+      jsUrlsFound, jsSecretFindings, jsParamUrls, gfTagged: gfFilterRes.matches || [], gfSummary: gfSummaryLines,
+      ports, dnsRecords, whoisLines, endpoints,
+      waybackUrls, uroUrls, urldedupeUrls, urlPatterns, gfMatches, paramUrls,
+      techLines, xssFindings
+    });
+  });
+
+  wireToolCard('subdomains', subs, () => runTool({ key: 'subdomains', endpoint: 'subdomains', t }));
+  wireToolCard('subfinder', subfinderSubs, () => runTool({ key: 'subfinder', endpoint: 'subfinder', t }));
+  wireToolCard('httpxlive', liveHosts, () => runTool({ key: 'httpxlive', endpoint: 'httpx_live', t }));
+  wireToolCard('httpxfilter', httpxSplit, () => runTool({ key: 'httpxfilter', endpoint: 'httpx_filter', t }));
+  wireToolCard('wafdetect', wafRows, () => runTool({ key: 'wafdetect', endpoint: 'waf', t }));
+  wireToolCard('waffilter', wafFilterRes.ran ? (wafFilterRes.with_waf_count ? wafFilterRes.with_waf : wafFilterRes.no_waf) : [], () => runTool({ key: 'waffilter', endpoint: 'waf_filter', t }));
+  wireToolCard('katana', katanaUrls, () => runTool({ key: 'katana', endpoint: 'katana', t }));
+  wireToolCard('jsextract', jsFiles, () => runTool({ key: 'jsextract', endpoint: 'js_extractor', t }));
+  wireToolCard('jsurls', jsUrlsFound, () => runTool({ key: 'jsurls', endpoint: 'jsluice_urls', t }));
+  wireToolCard('jssecrets', jsSecretFindings, () => runTool({ key: 'jssecrets', endpoint: 'jsluice_secrets', t }));
+  wireToolCard('jsparams', jsParamUrls, () => runTool({ key: 'jsparams', endpoint: 'js_params', t }));
+  wireToolCard('gffilter', gfFilterRes.matches || [], () => runTool({ key: 'gffilter', endpoint: 'gf_filter', t }));
+  wireToolCard('gfsummary', gfSummaryLines, () => runTool({ key: 'gfsummary', endpoint: 'gf_summary', t }));
+  wireToolCard('portscan', ports, () => runTool({ key: 'portscan', endpoint: 'portscan', t }));
+  wireToolCard('endpoints', endpoints, () => runTool({ key: 'endpoints', endpoint: 'endpoints', t }));
+  wireToolCard('dns', dnsRecords, () => runTool({ key: 'dns', endpoint: 'dns', t }));
+  wireToolCard('whois', whoisLines, () => runTool({ key: 'whois', endpoint: 'whois', t }));
+  wireToolCard('techinfo', techLines, () => runTool({ key: 'techinfo', endpoint: 'techinfo', t }));
+  wireToolCard('wayback', waybackUrls, () => runTool({ key: 'wayback', endpoint: 'wayback', t }));
+  wireToolCard('uro', uroUrls, () => runTool({ key: 'uro', endpoint: 'uro', t }));
+  wireToolCard('urldedupe', urldedupeUrls, () => runTool({ key: 'urldedupe', endpoint: 'urldedupe', t }));
+  wireToolCard('urlpatterns', urlPatterns, () => runTool({ key: 'urlpatterns', endpoint: 'urlpatterns', t }));
+  wireToolCard('gf', gfMatches, () => runTool({ key: 'gf', endpoint: 'gf', t }));
+  wireToolCard('allparams', paramUrls, () => runTool({ key: 'allparams', endpoint: 'all_params', t }));
+  wireToolCard('xssprobe', xssFindings, () => runTool({ key: 'xssprobe', endpoint: 'xssprobe', t }));
+
+}
+
+// Modal
+const overlay = document.getElementById('modal-overlay');
+const nameInput = document.getElementById('input-name');
+const urlInput = document.getElementById('input-url');
+const errorEl = document.getElementById('modal-error');
+
+document.getElementById('add-target-btn').addEventListener('click', () => {
+  nameInput.value = '';
+  urlInput.value = '';
+  errorEl.style.display = 'none';
+  overlay.classList.add('show');
+  nameInput.focus();
+});
+document.getElementById('modal-cancel').addEventListener('click', () => overlay.classList.remove('show'));
+overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('show'); });
+
+document.getElementById('modal-save').addEventListener('click', async () => {
+  const name = nameInput.value.trim();
+  const domain = urlInput.value.trim();
+  if (!name || !domain) {
+    errorEl.textContent = 'Please enter a valid name and domain.';
+    errorEl.style.display = 'block';
+    return;
+  }
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, domain })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    errorEl.textContent = data.error || 'Something went wrong';
+    errorEl.style.display = 'block';
+    return;
+  }
+  await fetchTargets();
+  activeId = data.id;
+  resetUiState();
+  overlay.classList.remove('show');
+  renderSidebar();
+  renderMain();
+});
+
+// Landing page navigation
+let frameworkInitialized = false;
+
+async function showFramework() {
+  document.getElementById('landing-page').style.display = 'none';
+  document.getElementById('monitoring-page').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'flex';
+  if (!frameworkInitialized) {
+    frameworkInitialized = true;
+    await fetchTargets();
+    renderSidebar();
+    renderMain();
+  }
+}
+
+async function showMonitoring() {
+  document.getElementById('landing-page').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'none';
+  document.getElementById('monitoring-page').style.display = 'block';
+  document.getElementById('monitoring-page').scrollTop = 0;
+  await monRefresh();
+  monRenderEmpty('Search for something to see results — nothing is listed until you search.');
+}
+
+function showLanding() {
+  document.getElementById('app-shell').style.display = 'none';
+  document.getElementById('monitoring-page').style.display = 'none';
+  document.getElementById('landing-page').style.display = 'flex';
+}
+
+document.getElementById('landing-framework-btn').addEventListener('click', showFramework);
+document.getElementById('landing-monitoring-btn').addEventListener('click', showMonitoring);
+document.getElementById('back-to-landing-from-app').addEventListener('click', showLanding);
+document.getElementById('back-to-landing-from-monitoring').addEventListener('click', showLanding);
+
+
+// ---------- Theme toggle - persisted in localStorage (per-browser, this is a local
+// tool running on your own machine, not a hosted Claude artifact).
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = theme === 'light' ? '\u263D Dark' : '\u2600 Light';
+}
+
+(function initTheme() {
+  const saved = localStorage.getItem('theme') || 'dark';
+  applyTheme(saved);
+})();
+
+document.getElementById('theme-toggle-btn').addEventListener('click', () => {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'light' ? 'dark' : 'light';
+  localStorage.setItem('theme', next);
+  applyTheme(next);
+});
