@@ -23,7 +23,7 @@
         <button id="landing-monitoring-btn" class="landing-btn">
           <span class="landing-btn-glyph">&#9679;</span>
           <span class="landing-btn-title">Monitoring</span>
-          <span class="landing-btn-sub">Coming soon</span>
+          <span class="landing-btn-sub">Logs and search</span>
         </button>
       </div>
     </div>
@@ -45,10 +45,46 @@
     </div>
   </div>
 
-  <div id="monitoring-page">
-    <button id="back-to-landing-from-monitoring" class="back-link monitoring-back">&larr; Back</button>
-    <div class="landing-label">MONITORING</div>
-    <p>This section isn't built yet - coming in a later phase.</p>
+  <div id="monitoring-page" style="display:none;">
+    <div class="mon-wrap">
+      <button id="back-to-landing-from-monitoring" class="back-link">&larr; Back</button>
+      <div class="label">MONITORING</div>
+      <h2>Dark Web Monitor</h2>
+      <p class="mon-sub">Search logs you indexed, by email, username, domain or URL. Only use logs you have lawful access to.</p>
+      <div class="mon-banner">Passwords are stored in plain text in <code>backend/monitoring_data/logs.jsonl</code> so the eye icon can reveal them. They are blurred on screen by default. Do not share that file.</div>
+      <div class="mon-stats"><span>Log entries indexed: <strong id="mon-total">0</strong></span></div>
+
+      <div class="mon-card">
+        <h3>Search logs</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="mon-q" type="text" placeholder="e.g. alice@example.com" style="flex:1;min-width:220px">
+          <select id="mon-field"><option value="all">All fields</option><option value="email">Email</option><option value="username">Username</option><option value="domain">Domain</option><option value="url">URL</option></select>
+          <button class="run-btn" id="mon-search-btn">Search</button>
+          <button class="ghost-btn" id="mon-clear-btn">Clear</button>
+        </div>
+        <span id="mon-count" style="font-size:12px;color:var(--text-faint)"></span>
+        <div style="overflow-x:auto"><table class="mon-table"><thead><tr><th>Date</th><th>Service / URL</th><th>Email / Username</th><th>Password</th><th>Source</th></tr></thead><tbody id="mon-results"></tbody></table></div>
+      </div>
+
+      <div class="mon-card">
+        <h3>Add log by link</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="mon-link-url" type="text" placeholder="https://example.com/logs.txt" style="flex:1;min-width:220px">
+          <button class="run-btn" id="mon-link-btn">Fetch + index link</button>
+        </div>
+        <p class="tool-note" id="mon-link-status">Paste a link to a .txt / .log / .csv / .json file (max 50 MB). The server downloads it and indexes it. The link is saved as the source.</p>
+      </div>
+
+      <div class="mon-card">
+        <h3>Ingest logs</h3>
+        <p class="tool-note">Import log files you already have lawful access to. Formats: <code>url:user:pass</code>, <code>email:pass</code>, <code>url | user | pass</code>, CSV, JSON-lines.</p>
+        <div class="mon-drop" id="mon-drop">Drop .txt / .csv / .json / .log files here, or click to choose<input type="file" id="mon-file" multiple accept=".txt,.csv,.json,.log" hidden></div>
+        <div style="display:flex;gap:8px;margin-top:8px"><button class="ghost-btn" id="mon-choose-btn">Choose file…</button><span id="mon-ingest-status" style="font-size:12px;color:var(--text-faint);align-self:center"></span></div>
+        <textarea id="mon-paste" rows="3" placeholder="Or paste log lines here, one per line" style="width:100%;margin-top:10px"></textarea>
+        <button class="ghost-btn" id="mon-paste-btn" style="margin-top:8px">Import pasted lines</button>
+      </div>
+
+    </div>
   </div>
 
   <div id="modal-overlay">

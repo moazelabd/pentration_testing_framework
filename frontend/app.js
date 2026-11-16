@@ -355,6 +355,108 @@ function downloadReport(t, data) {
   URL.revokeObjectURL(url);
 }
 
+
+
+// ---------- Monitoring page (landing option, beside Framework) ----------
+const MON = '/api/monitoring';
+function monEsc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+window.monTogglePw = function(btn){
+  const span = btn.parentElement.querySelector('.pw-val');
+  if (!span) return;
+  const hidden = span.classList.toggle('pw-blur');
+  span.classList.toggle('pw-show', !hidden);
+  btn.textContent = hidden ? 'Show' : 'Hide';
+};
+function monRenderEmpty(msg){
+  document.getElementById('mon-results').innerHTML = `<tr><td colspan="5" style="color:var(--text-faint);padding:14px">${monEsc(msg)}</td></tr>`;
+  document.getElementById('mon-count').textContent = '';
+}
+function monRenderRows(results){
+  const body = document.getElementById('mon-results');
+  document.getElementById('mon-count').textContent = results.length + ' result(s)';
+  if (!results.length) { monRenderEmpty('No matches. Try another email, username, domain or URL.'); return; }
+  body.innerHTML = results.slice(0, 200).map(e => {
+    const pw = e.password || '';
+    const pwCell = pw ? `<span class="pw-val pw-blur">${monEsc(pw)}</span><button class="pw-eye" onclick="monTogglePw(this)" title="Show / hide password">Show</button>` : '—';
+    return `<tr><td>${monEsc((e.date||'').slice(0,10))}</td><td>${monEsc(e.url||e.domain||'—')}</td><td>${e.email ? monEsc(e.email) : monEsc(e.username||'—')}</td><td>${pwCell}</td><td>${monEsc(e.source||'—')}</td></tr>`;
+  }).join('');
+}
+async function monRefresh(){
+  try { const d = await (await fetch(`${MON}/status`)).json(); document.getElementById('mon-total').textContent = d.logs || 0; } catch (e) { /* server not up yet */ }
+}
+async function monSearch(){
+  const q = document.getElementById('mon-q').value.trim();
+  if (!q) { monRenderEmpty('Search for something to see results — nothing is listed until you search.'); return; }
+  const field = document.getElementById('mon-field').value;
+  const d = await (await fetch(`${MON}/search?q=${encodeURIComponent(q)}&field=${encodeURIComponent(field)}`)).json();
+  monRenderRows(d.results || []);
+}
+async function monIngestFiles(files){
+  let total = 0;
+  for (const f of files) {
+    const text = await f.text();
+    const res = await fetch(`${MON}/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, source: f.name }) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'import failed');
+    total += d.added || 0;
+  }
+  return total;
+}
+async function monAfterImport(added){
+  document.getElementById('mon-ingest-status').textContent = 'Indexed ' + added + ' new entries.';
+  await monRefresh();
+  monSearch();
+}
+document.getElementById('mon-search-btn').addEventListener('click', monSearch);
+document.getElementById('mon-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') monSearch(); });
+document.getElementById('mon-clear-btn').addEventListener('click', () => {
+  document.getElementById('mon-q').value = '';
+  monRenderEmpty('Search for something to see results — nothing is listed until you search.');
+});
+document.getElementById('mon-link-btn').addEventListener('click', async () => {
+  const url = document.getElementById('mon-link-url').value.trim();
+  if (!url) return alert('Paste a log link first.');
+  try {
+    const res = await fetch(`${MON}/ingest-url`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'fetch failed');
+    document.getElementById('mon-link-status').textContent = 'Indexed ' + d.added + ' new entries from that link.';
+    await monRefresh();
+    alert('Indexed ' + d.added + ' new entries from that link. Now search for something.');
+  } catch (err) { alert('Link failed: ' + err.message); }
+});
+document.getElementById('mon-paste-btn').addEventListener('click', async () => {
+  const text = document.getElementById('mon-paste').value;
+  if (!text.trim()) return alert('Paste some log lines first.');
+  try {
+    const res = await fetch(`${MON}/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, source: 'pasted lines' }) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'import failed');
+    document.getElementById('mon-paste').value = '';
+    await monAfterImport(d.added || 0);
+    alert('Indexed ' + (d.added || 0) + ' new entries.');
+  } catch (err) { alert('Import failed: ' + err.message); }
+});
+// Drop zone: highlight + import, and stop the browser opening dropped files.
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+const monDrop = document.getElementById('mon-drop');
+monDrop.addEventListener('click', (e) => { if (e.target.id !== 'mon-file') document.getElementById('mon-file').click(); });
+monDrop.addEventListener('dragenter', (e) => { e.preventDefault(); monDrop.classList.add('drag'); });
+monDrop.addEventListener('dragover', (e) => { e.preventDefault(); monDrop.classList.add('drag'); });
+monDrop.addEventListener('dragleave', () => monDrop.classList.remove('drag'));
+monDrop.addEventListener('drop', async (e) => {
+  e.preventDefault(); e.stopPropagation(); monDrop.classList.remove('drag');
+  try { const added = await monIngestFiles(e.dataTransfer.files); await monAfterImport(added); alert('Indexed ' + added + ' new entries.'); }
+  catch (err) { alert('Import failed: ' + err.message); }
+});
+document.getElementById('mon-choose-btn').addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('mon-file').click(); });
+document.getElementById('mon-file').addEventListener('change', async (e) => {
+  try { const added = await monIngestFiles(e.target.files); await monAfterImport(added); alert('Indexed ' + added + ' new entries.'); }
+  catch (err) { alert('Import failed: ' + err.message); }
+  e.target.value = '';
+});
+
 // ---- main render ----
 
 async function renderMain() {
@@ -796,6 +898,7 @@ async function renderMain() {
   wireToolCard('gf', gfMatches, () => runTool({ key: 'gf', endpoint: 'gf', t }));
   wireToolCard('allparams', paramUrls, () => runTool({ key: 'allparams', endpoint: 'all_params', t }));
   wireToolCard('xssprobe', xssFindings, () => runTool({ key: 'xssprobe', endpoint: 'xssprobe', t }));
+
 }
 
 // Modal
@@ -856,10 +959,13 @@ async function showFramework() {
   }
 }
 
-function showMonitoring() {
+async function showMonitoring() {
   document.getElementById('landing-page').style.display = 'none';
   document.getElementById('app-shell').style.display = 'none';
-  document.getElementById('monitoring-page').style.display = 'flex';
+  document.getElementById('monitoring-page').style.display = 'block';
+  document.getElementById('monitoring-page').scrollTop = 0;
+  await monRefresh();
+  monRenderEmpty('Search for something to see results — nothing is listed until you search.');
 }
 
 function showLanding() {
@@ -873,7 +979,8 @@ document.getElementById('landing-monitoring-btn').addEventListener('click', show
 document.getElementById('back-to-landing-from-app').addEventListener('click', showLanding);
 document.getElementById('back-to-landing-from-monitoring').addEventListener('click', showLanding);
 
-// Theme toggle - persisted in localStorage (per-browser, this is a local
+
+// ---------- Theme toggle - persisted in localStorage (per-browser, this is a local
 // tool running on your own machine, not a hosted Claude artifact).
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
