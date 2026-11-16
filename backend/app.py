@@ -15,6 +15,7 @@ Then open http://localhost:5000 in your browser.
 from flask import Flask, jsonify, request, send_from_directory
 
 import storage
+from modules.monitoring import log_monitor
 from modules.recon import (
     dns_records, endpoints, gf_filter, gf_extractor, gf_summary,
     httpx_filter, httpx_live,
@@ -616,6 +617,101 @@ def run_waf_filter_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(waf_filter.run(domain, target_path))
+
+
+
+
+# ---------- monitoring (built-in, was "Coming soon") ----------
+# The Monitoring page on the landing screen. Logs are indexed globally
+# (by link or by file/paste) into backend/monitoring_data/logs.jsonl,
+# and the page searches that store. No watchlist/sources/alerts cards
+# in the UI any more, but their API routes stay so old data still loads.
+
+@app.route("/api/monitoring/status", methods=["GET"])
+def monitoring_status():
+    return jsonify(log_monitor.status())
+
+
+@app.route("/api/monitoring/search", methods=["GET"])
+def monitoring_search():
+    q = request.args.get("q", "")
+    field = request.args.get("field", "all")
+    source = request.args.get("source", "")
+    results = log_monitor.search(q, field, source)
+    return jsonify({"results": results, "count": len(results)})
+
+
+@app.route("/api/monitoring/ingest", methods=["POST"])
+def monitoring_ingest():
+    data = request.get_json(force=True, silent=True) or {}
+    text = data.get("text") or ""
+    if not text.strip():
+        return jsonify({"error": "No log text provided"}), 400
+    return jsonify(log_monitor.append_text(text, data.get("source") or "import"))
+
+
+@app.route("/api/monitoring/ingest-url", methods=["POST"])
+def monitoring_ingest_url():
+    data = request.get_json(force=True, silent=True) or {}
+    url = (data.get("url") or "").strip()
+    res = log_monitor.fetch_url(url)
+    if "error" in res:
+        return jsonify({"error": res["error"]}), 502
+    result = log_monitor.append_text(res["text"], url)
+    result["url"] = url
+    return jsonify(result)
+
+
+@app.route("/api/monitoring/watchlist", methods=["GET", "POST"])
+def monitoring_watchlist():
+    path = os.path.join(log_monitor.DATA, "watchlist.json")
+    items = log_monitor._load(path, [])
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        value = (data.get("value") or "").strip()
+        if value and value not in items:
+            items.append(value)
+            log_monitor._save(path, items)
+        return jsonify({"items": items})
+    return jsonify({"items": items})
+
+
+@app.route("/api/monitoring/watchlist/<int:i>", methods=["DELETE"])
+def monitoring_watchlist_delete(i):
+    path = os.path.join(log_monitor.DATA, "watchlist.json")
+    items = log_monitor._load(path, [])
+    if 0 <= i < len(items):
+        items.pop(i)
+        log_monitor._save(path, items)
+    return jsonify({"items": items})
+
+
+@app.route("/api/monitoring/sources", methods=["GET", "POST"])
+def monitoring_sources():
+    path = os.path.join(log_monitor.DATA, "sources.json")
+    items = log_monitor._load(path, [])
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        if data.get("name"):
+            items.append(data)
+            log_monitor._save(path, items)
+        return jsonify({"items": items})
+    return jsonify({"items": items})
+
+
+@app.route("/api/monitoring/sources/<int:i>", methods=["DELETE"])
+def monitoring_sources_delete(i):
+    path = os.path.join(log_monitor.DATA, "sources.json")
+    items = log_monitor._load(path, [])
+    if 0 <= i < len(items):
+        items.pop(i)
+        log_monitor._save(path, items)
+    return jsonify({"items": items})
+
+
+@app.route("/api/monitoring/alerts", methods=["GET"])
+def monitoring_alerts():
+    return jsonify({"items": log_monitor._load(os.path.join(log_monitor.DATA, "alerts.json"), [])})
 
 
 if __name__ == "__main__":
