@@ -47,7 +47,7 @@ Recon Framework - Tools / APIs Used Per Module
      - Internet Archive CDX API   http://web.archive.org/cdx/search/cdx
 
 8) URL Pattern Filter (gf-patterns-inspired)
-   File: backend/modules/recon/url_pattern_filter.py
+   File: backend/modules/vuln_scan/url_pattern_filter.py
    Type: PASSIVE, zero network calls (re-reads wayback.txt from module 7)
    Inspired by: Gf-Patterns  https://github.com/1ndianl33t/Gf-Patterns
    Categories: xss, redirect, ssrf, sqli, lfi, rce, idor, debug_logic, interesting_ext
@@ -64,7 +64,7 @@ Recon Framework - Tools / APIs Used Per Module
    (uro_urls.txt) if present, falling back to raw wayback.txt otherwise.
 
 10) XSS Reflection Prober (dalfox-inspired)
-   File: backend/modules/recon/xss_prober.py
+   File: backend/modules/vuln_scan/xss_prober.py
    Type: ACTIVE (sends crafted requests to the target)
    Inspired by: dalfox / kxss reflection-detection technique
    Reads: url_patterns.txt (module 8) for URLs tagged "xss"
@@ -187,7 +187,7 @@ Recon Framework - Tools / APIs Used Per Module
      parameter NAMES are still valid targets for the active phase.
 
 19) JavaScript Secrets (jsluice secrets mode)
-   File: backend/modules/recon/jsluice_secrets.py
+   File: backend/modules/vuln_scan/jsluice_secrets.py
    Type: ACTIVE-ISH (jsluice itself fetches each JS file listed as a URL)
    Tool used:
      - jsluice (Bishop Fox) - same binary as module 18, `secrets` mode:

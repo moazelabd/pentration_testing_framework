@@ -20,13 +20,13 @@ from modules.monitoring import log_monitor
 from modules.recon import (
     dns_records, endpoints,
     httpx_filter, httpx_live,
-    js_param_collector, js_extractor, jsluice_secrets, jsluice_urls,
+    js_param_collector, js_extractor, jsluice_urls,
     katana_crawl, param_collector, portscan,
     subfinder_enum, subdomains_all_in_one as subdomains,
-    tech_fingerprint, url_pattern_filter, urldedupe_filter,
+    tech_fingerprint, urldedupe_filter,
     uro_filter, waf_detect, waf_filter, wayback_urls, whois_lookup,
-    xss_prober,
 )
+from modules.vuln_scan import jsluice_secrets, url_pattern_filter, xss_prober
 
 app = Flask(__name__, static_folder=storage.FRONTEND_DIR, static_url_path="")
 
@@ -265,7 +265,7 @@ def run_uro_route(target_id):
     return module_result(uro_filter.run(domain, target_path))
 
 
-# ---------- recon: URL pattern filter (gf-patterns-inspired) ----------
+# ---------- vuln scan: URL pattern filter (gf-patterns-inspired) ----------
 
 @app.route("/api/targets/<target_id>/urlpatterns", methods=["GET"])
 def get_urlpatterns(target_id):

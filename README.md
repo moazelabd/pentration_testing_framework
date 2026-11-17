@@ -16,7 +16,7 @@ capstone_prj/
 │   ├── requirements.txt
 │   ├── modules/
 │   │   ├── recon/           # one file per recon tool
-│   │   └── vuln_scan/       # next phase - scaffolded, not implemented yet
+│   │   └── vuln_scan/       # URL pattern filter, JS secrets, XSS prober (+ planned modules)
 │   └── targets/              # one folder per target, created automatically
 └── frontend/
     ├── index.html
@@ -58,9 +58,17 @@ Wayback Machine URLs -> URL Cleaner (uro)   -> URL Pattern Filter -> XSS Reflect
 **Run All** (top of the Recon section) runs every tool in this safe order
 automatically, skipping past any tool that fails.
 
-Tools are grouped into **Discovery** (Subdomains, Subfinder, Live Host Probe, Live Host Filter, Port Scan, DNS, WHOIS),
-**Content & URL Analysis** (Endpoints, Wayback, uro, urldedupe, URL Pattern Filter, Parameter Collector),
-and **Active Testing** (Tech Fingerprint, XSS Prober).
+The **Vulnerability Scan** section has its own **Run All** (URL Pattern Filter -> JS Secrets -> XSS Prober).
+It relies on Recon results, so run Recon first.
+
+The target page has two collapsible sections.
+
+**Recon** - **Discovery** (Subdomains, Subfinder, Live Host Probe, Live Host Filter, Port Scan, DNS, WHOIS),
+**Content & URL Analysis** (WAF Detection/Filter, Katana, JS Extractor, jsluice URLs, JS Parameter Collector,
+Endpoints, Wayback, uro, urldedupe, Parameter Collector) and **Fingerprinting** (Tech Fingerprint + TLS).
+
+**Vulnerability Scan** - **Triage & Secrets** (URL Pattern Filter, JS Secrets via jsluice) and
+**Active Testing** (XSS Reflection Prober).
 
 ## External CLI tools (optional but recommended)
 
@@ -110,9 +118,9 @@ Results save to `backend/targets/<target-id>/*.txt`, one file per tool.
 
 ## What's next (not built yet)
 
-`backend/modules/vuln_scan/` is scaffolded for: `nse_vuln_scripts.py`,
-`tls_checks.py`, `web_misconfig.py`, `cve_lookup.py`. The **Monitoring**
-button is also just a placeholder for now.
+`backend/modules/vuln_scan/` already holds `url_pattern_filter.py`, `jsluice_secrets.py` and
+`xss_prober.py`. Still planned: `nse_vuln_scripts.py`, `tls_checks.py`, `web_misconfig.py`,
+`cve_lookup.py`. The **Monitoring** button is also just a placeholder for now.
 
 ## Adding a new tool
 

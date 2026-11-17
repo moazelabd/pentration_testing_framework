@@ -6,7 +6,7 @@ let activeId = null;
 // UI collapse/expand state - kept in memory so it survives re-renders
 // (e.g. after running a tool) instead of resetting every time.
 let uiState = {
-  sections: { recon: false },
+  sections: { recon: false, vuln: false },
   tools: {
     subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
     portscan: false, endpoints: false,
@@ -19,7 +19,7 @@ let uiState = {
 
 function resetUiState() {
   uiState = {
-    sections: { recon: false },
+    sections: { recon: false, vuln: false },
     tools: {
       subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
       portscan: false, endpoints: false,
@@ -31,32 +31,44 @@ function resetUiState() {
   };
 }
 
-// Dependency-safe order for "Run All":
-//   (subfinder | subdomains) -> httpx live probe -> status split ->
-//   katana crawl -> JS extraction -> (portscan/dns/...) rest ->
-//   wayback -> (uro | urldedupe) -> allparams -> URL Pattern Filter -> XSS Prober
+// Dependency-safe order for "Run All" (Recon):
+//   1) passive intel      : subdomains, subfinder, dns, whois, wayback
+//   2) live hosts         : httpx probe -> status split
+//   3) fingerprint        : wafw00f -> waf filter, tech fingerprint, port scan
+//   4) crawl + JS         : katana -> JS extractor -> jsluice urls
+//   5) URL cleanup        : uro, urldedupe -> Parameter Collector
+//   6) merge + endpoints  : JS Parameter Collector (must run AFTER Parameter
+//                           Collector, which rewrites all_params.txt), endpoints
 const RUN_ALL_ORDER = [
-  { key: 'subfinder', endpoint: 'subfinder' },
   { key: 'subdomains', endpoint: 'subdomains' },
+  { key: 'subfinder', endpoint: 'subfinder' },
+  { key: 'dns', endpoint: 'dns' },
+  { key: 'whois', endpoint: 'whois' },
+  { key: 'wayback', endpoint: 'wayback' },
   { key: 'httpxlive', endpoint: 'httpx_live' },
   { key: 'httpxfilter', endpoint: 'httpx_filter' },
   { key: 'wafdetect', endpoint: 'waf' },
   { key: 'waffilter', endpoint: 'waf_filter' },
+  { key: 'techinfo', endpoint: 'techinfo' },
+  { key: 'portscan', endpoint: 'portscan' },
   { key: 'katana', endpoint: 'katana' },
   { key: 'jsextract', endpoint: 'js_extractor' },
   { key: 'jsurls', endpoint: 'jsluice_urls' },
-  { key: 'jssecrets', endpoint: 'jsluice_secrets' },
-  { key: 'jsparams', endpoint: 'js_params' },
-  { key: 'portscan', endpoint: 'portscan' },
-  { key: 'dns', endpoint: 'dns' },
-  { key: 'whois', endpoint: 'whois' },
-  { key: 'techinfo', endpoint: 'techinfo' },
-  { key: 'wayback', endpoint: 'wayback' },
-  { key: 'urldedupe', endpoint: 'urldedupe' },
   { key: 'uro', endpoint: 'uro' },
-  { key: 'endpoints', endpoint: 'endpoints' },
-  { key: 'urlpatterns', endpoint: 'urlpatterns' },
+  { key: 'urldedupe', endpoint: 'urldedupe' },
   { key: 'allparams', endpoint: 'all_params' },
+  { key: 'jsparams', endpoint: 'js_params' },
+  { key: 'endpoints', endpoint: 'endpoints' },
+];
+
+// Tools that belong to the Vulnerability Scan section (everything else is Recon).
+const VULN_TOOL_KEYS = ['urlpatterns', 'jssecrets', 'xssprobe'];
+
+// Run order for the Vulnerability Scan section's "Run All".
+//   URL Pattern Filter -> XSS Reflection Prober ; JS Secrets (needs JS Extractor from Recon)
+const VULN_RUN_ALL_ORDER = [
+  { key: 'urlpatterns', endpoint: 'urlpatterns' },
+  { key: 'jssecrets', endpoint: 'jsluice_secrets' },
   { key: 'xssprobe', endpoint: 'xssprobe' },
 ];
 
@@ -242,7 +254,7 @@ async function runTool({ key, endpoint, method, resultKey, t, onDone }) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Unknown error');
 
-    uiState.sections.recon = true;
+    uiState.sections[VULN_TOOL_KEYS.includes(key) ? 'vuln' : 'recon'] = true;
     uiState.tools[key] = true;
     renderMain();
   } catch (err) {
@@ -252,16 +264,16 @@ async function runTool({ key, endpoint, method, resultKey, t, onDone }) {
   }
 }
 
-async function runAll(t) {
-  const btn = document.getElementById('run-all-btn');
-  const statusEl = document.getElementById('run-all-status');
+async function runAll(t, order = RUN_ALL_ORDER, btnId = 'run-all-btn', statusId = 'run-all-status', sectionKey = 'recon') {
+  const btn = document.getElementById(btnId);
+  const statusEl = document.getElementById(statusId);
   if (!btn || !statusEl) return;
   btn.disabled = true;
   const failures = [];
 
-  for (let i = 0; i < RUN_ALL_ORDER.length; i++) {
-    const step = RUN_ALL_ORDER[i];
-    statusEl.textContent = `Running ${step.key}... (${i + 1}/${RUN_ALL_ORDER.length})`;
+  for (let i = 0; i < order.length; i++) {
+    const step = order[i];
+    statusEl.textContent = `Running ${step.key}... (${i + 1}/${order.length})`;
     try {
       const res = await fetch(`${API}/${t.id}/${step.endpoint}`, { method: 'POST' });
       const data = await res.json();
@@ -275,7 +287,7 @@ async function runAll(t) {
     ? `Done, with ${failures.length} issue(s) - ${failures.join(' | ')}`
     : 'All tools finished.';
   btn.disabled = false;
-  uiState.sections.recon = true;
+  uiState.sections[sectionKey] = true;
   renderMain();
 }
 
@@ -498,6 +510,7 @@ async function renderMain() {
     : null;
 
   const reconOpen = uiState.sections.recon;
+  const vulnOpen = uiState.sections.vuln;
 
   const stats = [
     { label: 'Subdomains', value: subs.length },
@@ -650,16 +663,6 @@ async function renderMain() {
       disabledReason: !jsRes.ran ? 'Run "JS File Extractor" first' : null
     }),
     toolCardHTML({
-      key: 'jssecrets',
-      title: 'jsluice Secrets (Keys, Tokens, Credentials)',
-      description: 'jsluice secrets mode - built-in extractors flag leaked AWS/GCP keys, GitHub tokens, Firebase configs and more inside the JS files. HIGH-priority surface: confirm manually before reporting.',
-      note: `Saved to targets/${t.id}/jsluice_secrets_summary.txt (raw JSON: jsluice_secrets.json)`,
-      statusText: statusFor(jsSecretsRes.ran, (jsSecretsRes.counts ? (jsSecretsRes.counts.total || 0) : 0), 'secret finding(s)'),
-      updatedAt: jsSecretsRes.updated_at,
-      items: jsSecretFindings,
-      disabledReason: !jsRes.ran ? 'Run "JS File Extractor" first' : null
-    }),
-    toolCardHTML({
       key: 'jsparams',
       title: 'JS Parameter Collector (all_params)',
       description: 'Aggregates every parameterized URL from jsluice results, katana output and the previously collected list into one deduplicated worklist (all_params.txt) for the active-testing phase. Passive, zero traffic.',
@@ -708,16 +711,6 @@ async function renderMain() {
       disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
     }),
     toolCardHTML({
-      key: 'urlpatterns',
-      title: 'URL Pattern Filter',
-      description: 'Sorts URLs into categories (xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext) by param name / extension. Uses the uro-cleaned list if available. Passive, zero traffic - run Wayback Machine first.',
-      note: `Saved to targets/${t.id}/url_patterns.txt`,
-      statusText: statusFor(urlPatRes.ran, urlPatterns.length, 'matches found'),
-      updatedAt: urlPatRes.updated_at,
-      items: urlPatterns,
-      disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
-    }),
-    toolCardHTML({
       key: 'allparams',
       title: 'Parameter Collector',
       description: 'Consolidates every parameterized URL (?id=1, ?page=2, ...) found across Subfinder results and the cleaned URL lists into one worklist (all_params.txt) for the active-testing phase. Passive, zero traffic.',
@@ -729,7 +722,7 @@ async function renderMain() {
     }),
   ].join(''));
 
-  const activeGroup = toolGroupHTML('Active Testing', [
+  const fingerprintGroup = toolGroupHTML('Fingerprinting', [
     toolCardHTML({
       key: 'techinfo',
       title: 'Tech Fingerprint + TLS',
@@ -739,6 +732,32 @@ async function renderMain() {
       updatedAt: techRes.updated_at,
       items: techLines
     }),
+  ].join(''));
+
+  const vulnTriageGroup = toolGroupHTML('Triage & Secrets', [
+    toolCardHTML({
+      key: 'urlpatterns',
+      title: 'URL Pattern Filter',
+      description: 'Sorts URLs into categories (xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext) by param name / extension. Uses the uro-cleaned list if available. Passive, zero traffic - run Wayback Machine first.',
+      note: `Saved to targets/${t.id}/url_patterns.txt`,
+      statusText: statusFor(urlPatRes.ran, urlPatterns.length, 'matches found'),
+      updatedAt: urlPatRes.updated_at,
+      items: urlPatterns,
+      disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
+    }),
+    toolCardHTML({
+      key: 'jssecrets',
+      title: 'jsluice Secrets (Keys, Tokens, Credentials)',
+      description: 'jsluice secrets mode - built-in extractors flag leaked AWS/GCP keys, GitHub tokens, Firebase configs and more inside the JS files. HIGH-priority surface: confirm manually before reporting.',
+      note: `Saved to targets/${t.id}/jsluice_secrets_summary.txt (raw JSON: jsluice_secrets.json)`,
+      statusText: statusFor(jsSecretsRes.ran, (jsSecretsRes.counts ? (jsSecretsRes.counts.total || 0) : 0), 'secret finding(s)'),
+      updatedAt: jsSecretsRes.updated_at,
+      items: jsSecretFindings,
+      disabledReason: !jsRes.ran ? 'Run "JS File Extractor" first' : null
+    }),
+  ].join(''));
+
+  const vulnActiveGroup = toolGroupHTML('Active Testing', [
     toolCardHTML({
       key: 'xssprobe',
       title: 'XSS Reflection Prober (dalfox-inspired)',
@@ -776,7 +795,21 @@ async function renderMain() {
       <div class="section-body" id="section-recon-body" style="${reconOpen ? '' : 'display:none;'}">
         ${discoveryGroup}
         ${contentGroup}
-        ${activeGroup}
+        ${fingerprintGroup}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header" id="section-vuln">
+        <span class="chevron ${vulnOpen ? 'open' : ''}">&#9656;</span>
+        <span class="section-title">Vulnerability Scan</span>
+        <span class="section-sub">finding weaknesses</span>
+        <button id="run-all-vuln-btn" class="ghost-btn run-all-btn">Run All</button>
+      </div>
+      <div id="run-all-vuln-status" class="run-all-status"></div>
+      <div class="section-body" id="section-vuln-body" style="${vulnOpen ? '' : 'display:none;'}">
+        ${vulnTriageGroup}
+        ${vulnActiveGroup}
       </div>
     </div>
   `;
@@ -791,6 +824,18 @@ async function renderMain() {
   document.getElementById('run-all-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     runAll(t);
+  });
+
+  document.getElementById('section-vuln').addEventListener('click', (e) => {
+    if (e.target.id === 'run-all-vuln-btn') return;
+    uiState.sections.vuln = !uiState.sections.vuln;
+    toggleBlock('section-vuln-body', uiState.sections.vuln);
+    toggleChevron('section-vuln', uiState.sections.vuln);
+  });
+
+  document.getElementById('run-all-vuln-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    runAll(t, VULN_RUN_ALL_ORDER, 'run-all-vuln-btn', 'run-all-vuln-status', 'vuln');
   });
 
   document.getElementById('export-report-btn').addEventListener('click', () => {

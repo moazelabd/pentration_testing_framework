@@ -1,5 +1,8 @@
 """
-Vulnerability scanning modules - next capstone phase, not implemented yet.
+Vulnerability scanning modules.
+
+Implemented: url_pattern_filter.py, jsluice_secrets.py, xss_prober.py.
+Still planned (not implemented yet): the modules listed at the bottom.
 
 Each module here should follow the same shape as modules/recon/*.py:
   - get_cached(target_path) -> {"<key>": [...], "ran": bool}
