@@ -48,7 +48,7 @@ Most tools run independently. The dependent ones build chains, in order -
 the UI disables a tool's Run button until its prerequisite has run:
 
 ```
-Subfinder (+ Subdomain Enumeration) -> Live Host Probe (httpx) -> Live Host Filter -> Web Crawler (katana) -> JS File Extractor -> jsluice (urls/secrets) -> JS Parameter Collector
+Subfinder (+ Subdomain Enumeration) -> Live Host Probe (httpx) -> Live Host Filter -> Web Crawler (katana) -> JS File Extractor (katana + Wayback) -> jsluice (urls/secrets) -> JS Parameter Collector
                        \-> WAF Detection (wafw00f) -> WAF Filter
 Wayback Machine URLs -> URL Cleaner (uro)   -> URL Pattern Filter -> XSS Reflection Prober
                      -> URL Dedupe (urldedupe) -> Parameter Collector
@@ -80,8 +80,22 @@ go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install -v github.com/projectdiscovery/katana/cmd/katana@latest
 go install github.com/BishopFox/jsluice/cmd/jsluice@latest
-go install -v github.com/ameenmaali/urldedupe@latest
 pip install wafw00f
+```
+
+**urldedupe is a C++ project, not Go** - build it from source:
+
+```bash
+git clone https://github.com/ameenmaali/urldedupe
+cd urldedupe
+g++ -std=c++17 -O2 -o ~/go/bin/urldedupe main.cpp utils.cpp flags.cpp Url.cpp
+```
+
+If `go install` fails with `sum.golang.org: connection refused`
+(blocked network), retry with the checksum DB disabled:
+
+```bash
+GOSUMDB=off go install <the module>@latest
 ```
 
 nmap stays a separate package install (`apt install nmap`). If a CLI tool
@@ -97,7 +111,7 @@ the rest of the pipeline keeps working.
 | Live Host Probe (httpx) | active | Industry-standard `httpx` CLI - probes every subdomain, keeps 200/301/302/401/403/404 with titles + tech. Needs httpx on your PATH |
 | Live Host Filter (403/404 Split) | passive | Splits live_hosts.txt into live_<code>.txt files for per-status triage |
 | Web Crawler (katana) | active | Industry-standard `katana` CLI - depth-3 crawl of live 200 hosts, extracts URLs/forms/JS endpoints (-jc). Needs katana on your PATH |
-| JS File Extractor | passive | Keeps the .js URLs (incl. .js?query) from katana output into js_files.txt |
+| JS File Extractor | passive | Merges the .js URLs (incl. .js?query) from the katana crawl AND the Wayback Machine results into one deduplicated js_files.txt |
 | JS URLs (jsluice) | active-ish | `jsluice urls -I` (Bishop Fox, tree-sitter) - real fetch/redirect/API URLs + params from JS, not regex |
 | JS Secrets (jsluice) | active-ish | `jsluice secrets` - AWS/GCP/GitHub/Firebase tokens and keys leaked in JS, per-finding severity summary |
 | JS Parameter Collector | passive | Merges jsluice + katana + existing params into all_params.txt (input for active testing) |

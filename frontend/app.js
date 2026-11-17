@@ -645,12 +645,12 @@ async function renderMain() {
     toolCardHTML({
       key: 'jsextract',
       title: 'JS File Extractor',
-      description: 'Pulls the pure .js file URLs (including .js?query=) out of the katana results - JS files can hide API routes, parameter names and dead-code panels. Passive, zero traffic - run the Katana Crawler first.',
+      description: 'Merges the pure .js file URLs (including .js?query=) from the katana crawl AND the Wayback Machine results into one deduplicated list - JS files can hide API routes, parameter names and dead-code panels. Passive, zero traffic - run the Katana Crawler and/or Wayback Machine URLs first.',
       note: `Saved to targets/${t.id}/js_files.txt`,
       statusText: statusFor(jsRes.ran, jsFiles.length, 'JS files found'),
       updatedAt: jsRes.updated_at,
       items: jsFiles,
-      disabledReason: !katanaRes.ran ? 'Run "Web Crawler (katana)" first' : null
+      disabledReason: !katanaRes.ran && !waybackRes.ran ? 'Run "Web Crawler (katana)" or "Wayback Machine URLs" first' : null
     }),
     toolCardHTML({
       key: 'jsurls',

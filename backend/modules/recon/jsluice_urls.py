@@ -42,17 +42,17 @@ def run(domain: str, target_path: str) -> dict:
     js_path = os.path.join(target_path, "js_files.txt")
     if not os.path.isfile(js_path):
         return {
-            "error": "No js_files.txt found for this target - run the Katana "
-                     "Crawler first, then the JS File Extractor; this module "
-                     "analyzes the JS files katana discovered.",
+            "error": "No js_files.txt found for this target - run the JS File "
+                     "Extractor first (it merges katana and Wayback Machine "
+                     "results); this module analyzes those JS files.",
             "status": 400,
         }
 
     with open(js_path, "r", encoding="utf-8") as f:
         js_urls = [line.strip() for line in f if line.strip()]
     if not js_urls:
-        return {"error": "js_files.txt is empty - katana found no JS files for "
-                         "this target.", "status": 400}
+        return {"error": "js_files.txt is empty - no JS files were found in "
+                         "the katana / Wayback results last run.", "status": 400}
 
     urls_json_path = os.path.join(target_path, "jsluice_urls.json")
     urls_txt_path = os.path.join(target_path, "jsluice_urls.txt")

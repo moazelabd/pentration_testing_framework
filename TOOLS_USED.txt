@@ -156,12 +156,16 @@ Recon Framework - Tools / APIs Used Per Module
 
 17) JavaScript File Extractor
    File: backend/modules/recon/js_extractor.py
-   Type: PASSIVE, zero network calls (re-reads katana_urls.txt from module 16)
+   Type: PASSIVE, zero network calls (re-reads katana_urls.txt from
+     module 16 + urldedupe.txt (module 12) / wayback.txt (module 7))
    Method: keeps only lines ending in .js (incl. .min.js) or carrying a
-     query string after .js (.js?ver=...)
+     query string after .js (.js?ver=...), merges all sources and
+     deduplicates
    Output: js_files.txt - the JS attack surface: files can hide API
      routes, parameter names and dead code pointing at removed panels.
-     Feeds the active-testing phase alongside all_params.txt (module 13).
+     Katana alone is enough to run; the Wayback sources are merged in
+     automatically when present. Feeds the active-testing phase
+     alongside all_params.txt (module 13).
 
 
 18) JavaScript URLs, Paths & Parameters (jsluice urls mode)
