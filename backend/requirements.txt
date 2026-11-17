@@ -1,27 +1,30 @@
-# Python dependencies for the Flask backend and recon modules.
-# NOTE: The following external CLI tools must be installed on the system and
-# available in PATH (they are NOT pip packages - see README.md
-# "External CLI tools" for details):
-#   - subfinder (ProjectDiscovery)
-#     go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-#   - httpx (ProjectDiscovery)
-#     go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-#   - katana (ProjectDiscovery)
-#     go install -v github.com/projectdiscovery/katana/cmd/katana@latest
-#   - jsluice (Bishop Fox)
-#     go install github.com/BishopFox/jsluice/cmd/jsluice@latest
-#   - wafw00f - NOTE: a PYTHON pip package (pip install wafw00f), unlike
-#     the Go tools above - pip install --upgrade wafw00f
-#   - nmap
-#     apt install nmap   /   brew install nmap   /   https://nmap.org/download
-#   - urldedupe (ameenmaali)
-#     go install -v github.com/ameenmaali/urldedupe@latest
-#   - gf (tomnomnom) + Gf-Patterns set
-#     go install -v github.com/tomnomnom/gf@latest
-#     # Gf-Patterns json files go DIRECTLY into ~/.gf (gf reads that dir):
-#     git clone https://github.com/1ndianl33t/Gf-Patterns
-#     cp Gf-Patterns/*.json ~/.gf/
-Flask==3.0.3
-requests==2.32.3
-python-nmap==0.7.1
-dnspython==2.6.1
+# --- Core Web Framework ---
+Flask>=3.0.3
+Flask-Cors>=5.0.0
+Werkzeug>=3.0.4
+
+# --- HTTP & Async Requests ---
+requests>=2.32.3
+urllib3>=2.2.3
+aiohttp>=3.10.10
+httpx>=0.27.2
+
+# --- Network, DNS & WHOIS ---
+python-nmap>=0.7.1
+dnspython>=2.6.1
+python-whois>=0.9.4
+cryptography>=43.0.1
+
+# --- HTML & JS Parsing ---
+beautifulsoup4>=4.12.3
+
+# --- Reporting Module (HTML & Markdown) ---
+Jinja2>=3.1.4
+Markdown>=3.7
+
+# --- Database & Storage ---
+SQLAlchemy>=2.0.35
+
+# --- Task Queue & Background Jobs ---
+celery>=5.4.0
+redis>=5.1.1
