@@ -11,9 +11,8 @@ let uiState = {
     subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
     portscan: false, endpoints: false,
     dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-    urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
+    urldedupe: false, urlpatterns: false, xssprobe: false, allparams: false,
     katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
-    gffilter: false, gfsummary: false,
     wafdetect: false, waffilter: false
   }
 };
@@ -25,9 +24,8 @@ function resetUiState() {
       subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
       portscan: false, endpoints: false,
       dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-      urldedupe: false, urlpatterns: false, xssprobe: false, gf: false, allparams: false,
+      urldedupe: false, urlpatterns: false, xssprobe: false, allparams: false,
       katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
-      gffilter: false, gfsummary: false,
       wafdetect: false, waffilter: false
     }
   };
@@ -36,7 +34,7 @@ function resetUiState() {
 // Dependency-safe order for "Run All":
 //   (subfinder | subdomains) -> httpx live probe -> status split ->
 //   katana crawl -> JS extraction -> (portscan/dns/...) rest ->
-//   wayback -> (uro | urldedupe) -> gf/allparams -> URL Pattern Filter -> XSS Prober
+//   wayback -> (uro | urldedupe) -> allparams -> URL Pattern Filter -> XSS Prober
 const RUN_ALL_ORDER = [
   { key: 'subfinder', endpoint: 'subfinder' },
   { key: 'subdomains', endpoint: 'subdomains' },
@@ -49,8 +47,6 @@ const RUN_ALL_ORDER = [
   { key: 'jsurls', endpoint: 'jsluice_urls' },
   { key: 'jssecrets', endpoint: 'jsluice_secrets' },
   { key: 'jsparams', endpoint: 'js_params' },
-  { key: 'gffilter', endpoint: 'gf_filter' },
-  { key: 'gfsummary', endpoint: 'gf_summary' },
   { key: 'portscan', endpoint: 'portscan' },
   { key: 'dns', endpoint: 'dns' },
   { key: 'whois', endpoint: 'whois' },
@@ -60,7 +56,6 @@ const RUN_ALL_ORDER = [
   { key: 'uro', endpoint: 'uro' },
   { key: 'endpoints', endpoint: 'endpoints' },
   { key: 'urlpatterns', endpoint: 'urlpatterns' },
-  { key: 'gf', endpoint: 'gf' },
   { key: 'allparams', endpoint: 'all_params' },
   { key: 'xssprobe', endpoint: 'xssprobe' },
 ];
@@ -159,22 +154,7 @@ function formatRelativeTime(iso) {
 // actually need filtering.
 const SEARCH_THRESHOLD = 8;
 
-// Turns gf_filter counts into colored badges for the card header -
-// danger = categories worth triaging first (see CRITICAL_TAGS above).
-function gfPatternBadges(counts) {
-  const DANGER = ['rce', 'sqli'];
-  const WARN = ['xss', 'ssrf', 'lfi'];
-  const LABELS = { xss: 'XSS', sqli: 'SQLi', ssrf: 'SSRF', lfi: 'LFI', rce: 'RCE',
-                   idor: 'IDOR', redirect: 'Redirect', debug_logic: 'Debug',
-                   interesting_ext: 'IntExt' };
-  return Object.entries(counts)
-    .filter(([p, v]) => v > 0 && LABELS[p])
-    .sort((a, b) => b[1] - a[1])
-    .map(([p, v]) => ({ label: LABELS[p], value: v,
-                        cls: DANGER.includes(p) ? 'danger' : WARN.includes(p) ? 'warn' : 'info' }));
-}
-
-function toolCardHTML({ key, title, description, note, statusText, items, disabledReason, updatedAt, badges }) {
+function toolCardHTML({ key, title, description, note, statusText, items, disabledReason, updatedAt }) {
   const open = uiState.tools[key];
   const disabledAttr = disabledReason ? 'disabled' : '';
   const titleAttr = disabledReason ? ` title="${disabledReason}"` : '';
@@ -184,16 +164,12 @@ function toolCardHTML({ key, title, description, note, statusText, items, disabl
   const relTime = formatRelativeTime(updatedAt);
   const fullNote = relTime ? `${note} · Last run: ${relTime}` : note;
   const showSearch = items.length > SEARCH_THRESHOLD;
-  const badgesHTML = (badges || [])
-    .map(b => `<span class="gf-badge gf-badge-${b.cls}">${b.label}: ${b.value}</span>`)
-    .join(' ');
   return `
     <div class="tool-card">
       <div class="tool-card-head" id="tool-head-${key}">
         <span class="chevron ${open ? 'open' : ''}">&#9656;</span>
         <div class="tool-info">
           <h3>${title}</h3>
-          ${badgesHTML ? `<div class="gf-badges">${badgesHTML}</div>` : ''}
           <p>${description}</p>
         </div>
       </div>
@@ -325,8 +301,6 @@ function buildReportMarkdown(t, data) {
   md += reportSection('JS URLs (jsluice)', data.jsUrlsFound);
   md += reportSection('JS Secrets (jsluice)', data.jsSecretFindings);
   md += reportSection('JS Parameter Worklist (all_params)', data.jsParamUrls);
-  md += reportSection('GF Filtering (all_params)', data.gfTagged);
-  md += reportSection('GF Summary', data.gfSummary);
   md += reportSection('Port Scan (nmap)', data.ports);
   md += reportSection('DNS Records', data.dnsRecords);
   md += reportSection('WHOIS / RDAP Lookup', data.whoisLines);
@@ -334,8 +308,7 @@ function buildReportMarkdown(t, data) {
   md += reportSection('Wayback Machine URLs', data.waybackUrls);
   md += reportSection('URL Cleaner (uro)', data.uroUrls);
   md += reportSection('URL Dedupe (urldedupe)', data.urldedupeUrls);
-  md += reportSection('URL Pattern Filter (gf-patterns)', data.urlPatterns);
-  md += reportSection('Pattern Match (gf)', data.gfMatches);
+  md += reportSection('URL Pattern Filter', data.urlPatterns);
   md += reportSection('Parameter Collector (all_params)', data.paramUrls);
   md += reportSection('Tech Fingerprint + TLS', data.techLines);
   md += reportSection('XSS Reflection Prober (dalfox-inspired)', data.xssFindings);
@@ -471,7 +444,7 @@ async function renderMain() {
     return;
   }
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, gfRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, gfFilterRes, gfSummaryRes, wafRes, wafFilterRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -484,7 +457,6 @@ async function renderMain() {
     fetch(`${API}/${t.id}/xssprobe`).then(r => r.json()),
     fetch(`${API}/${t.id}/subfinder`).then(r => r.json()),
     fetch(`${API}/${t.id}/urldedupe`).then(r => r.json()),
-    fetch(`${API}/${t.id}/gf`).then(r => r.json()),
     fetch(`${API}/${t.id}/all_params`).then(r => r.json()),
     fetch(`${API}/${t.id}/httpx_live`).then(r => r.json()),
     fetch(`${API}/${t.id}/httpx_filter`).then(r => r.json()),
@@ -493,8 +465,6 @@ async function renderMain() {
     fetch(`${API}/${t.id}/jsluice_urls`).then(r => r.json()),
     fetch(`${API}/${t.id}/jsluice_secrets`).then(r => r.json()),
     fetch(`${API}/${t.id}/js_params`).then(r => r.json()),
-    fetch(`${API}/${t.id}/gf_filter`).then(r => r.json()),
-    fetch(`${API}/${t.id}/gf_summary`).then(r => r.json()),
     fetch(`${API}/${t.id}/waf`).then(r => r.json()),
     fetch(`${API}/${t.id}/waf_filter`).then(r => r.json()),
   ]);
@@ -511,7 +481,6 @@ async function renderMain() {
   const xssFindings = xssRes.findings || [];
   const subfinderSubs = subfinderRes.subdomains || [];
   const urldedupeUrls = urldedRes.urls || [];
-  const gfMatches = gfRes.matches || [];
   const paramUrls = paramsRes.urls || [];
   const liveHosts = httpxLiveRes.hosts || [];
   const httpxSplit = httpxFilterRes.summary || [];
@@ -520,9 +489,6 @@ async function renderMain() {
   const jsUrlsFound = jsUrlsRes.urls || [];
   const jsSecretFindings = jsSecretsRes.findings || [];
   const jsParamUrls = jsParamsRes.urls || [];
-  const gfFilterCount = gfFilterRes.counts ? Object.values(gfFilterRes.counts).reduce((a, b) => a + b, 0) : 0;
-  const gfSummaryLines = gfSummaryRes.summary || [];
-  const gfBadges = gfFilterRes.counts ? gfPatternBadges(gfFilterRes.counts) : [];
   const wafRows = wafRes.rows || [];
   const wafStatusText = wafRes.ran
     ? `${wafRes.detected || 0} host(s) behind WAF${(wafRes.wafs_found || []).length ? ': ' + wafRes.wafs_found.join(', ') : ''} · ${wafRes.not_detected || 0} without WAF`
@@ -543,7 +509,6 @@ async function renderMain() {
     { label: 'JS URLs', value: jsUrlsFound.length },
     { label: 'JS secrets', value: (jsSecretsRes.counts ? (jsSecretsRes.counts.total || 0) : 0), danger: true },
     { label: 'JS param URLs', value: jsParamUrls.length },
-    { label: 'GF tagged', value: gfFilterCount },
     { label: 'Open ports', value: ports.length },
     { label: 'Endpoints', value: endpoints.length },
     { label: 'DNS records', value: dnsRecords.length },
@@ -553,7 +518,6 @@ async function renderMain() {
     { label: 'Clean URLs (uro)', value: uroUrls.length },
     { label: 'Deduped URLs', value: urldedupeUrls.length },
     { label: 'Pattern matches', value: urlPatterns.length },
-    { label: 'gf matches', value: gfMatches.length },
     { label: 'Param URLs', value: paramUrls.length },
     { label: 'XSS findings', value: xssFindings.length, danger: true },
   ];
@@ -698,34 +662,12 @@ async function renderMain() {
     toolCardHTML({
       key: 'jsparams',
       title: 'JS Parameter Collector (all_params)',
-      description: 'Aggregates every parameterized URL from jsluice results, katana output and the previously collected list into one deduplicated worklist (all_params.txt) for the gf / active-testing phase. Passive, zero traffic.',
+      description: 'Aggregates every parameterized URL from jsluice results, katana output and the previously collected list into one deduplicated worklist (all_params.txt) for the active-testing phase. Passive, zero traffic.',
       note: `Saved to targets/${t.id}/all_params.txt`,
       statusText: statusFor(jsParamsRes.ran, jsParamUrls.length, 'parameterized URLs'),
       updatedAt: jsParamsRes.updated_at,
       items: jsParamUrls,
       disabledReason: !jsUrlsRes.ran && !katanaRes.ran ? 'Run "jsluice URLs" or "Web Crawler (katana)" first' : null
-    }),
-    toolCardHTML({
-      key: 'gffilter',
-      title: 'GF Parameter Filtering',
-      description: 'Industry-standard gf CLI + Gf-Patterns - tags the all_params.txt worklist into vulnerability categories (xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext) by parameter name / extension. Counts shown below as badges. Passive, zero traffic.',
-      note: `Saved to targets/${t.id}/gf_<pattern>.txt · requires gf + Gf-Patterns in ~/.gf`,
-      statusText: statusFor(gfFilterRes.ran, gfFilterCount, 'tagged URLs'),
-      updatedAt: gfFilterRes.updated_at,
-      items: gfFilterRes.matches || [],
-      badges: gfBadges,
-      disabledReason: !jsParamsRes.ran && !paramsRes.ran ? 'Run "JS Parameter Collector" or "Parameter Collector" first' : null
-    }),
-    toolCardHTML({
-      key: 'gfsummary',
-      title: 'GF Summary Report',
-      description: 'One-glance report across every gf_<pattern>.txt file - per-pattern match counts and which categories to triage first (rce/sqli/xss). Passive, zero traffic - run GF Parameter Filtering first.',
-      note: `Saved to targets/${t.id}/gf_summary.txt`,
-      statusText: statusFor(gfSummaryRes.ran, gfSummaryRes.total || 0, 'URLs tagged'),
-      updatedAt: gfSummaryRes.updated_at,
-      items: gfSummaryLines,
-      badges: gfSummaryRes.counts ? gfPatternBadges(gfSummaryRes.counts) : [],
-      disabledReason: !jsParamsRes.ran && !paramsRes.ran ? 'Run the worklist collectors first' : null
     }),
     toolCardHTML({
       key: 'endpoints',
@@ -767,22 +709,12 @@ async function renderMain() {
     }),
     toolCardHTML({
       key: 'urlpatterns',
-      title: 'URL Pattern Filter (gf-patterns)',
+      title: 'URL Pattern Filter',
       description: 'Sorts URLs into categories (xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext) by param name / extension. Uses the uro-cleaned list if available. Passive, zero traffic - run Wayback Machine first.',
       note: `Saved to targets/${t.id}/url_patterns.txt`,
       statusText: statusFor(urlPatRes.ran, urlPatterns.length, 'matches found'),
       updatedAt: urlPatRes.updated_at,
       items: urlPatterns,
-      disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
-    }),
-    toolCardHTML({
-      key: 'gf',
-      title: 'Pattern Match (gf)',
-      description: 'Industry-standard gf CLI with Gf-Patterns - pulls URLs matching each category (xss, sqli, ssrf, lfi, rce, redirect, idor, debug_logic) into gf_<pattern>.txt files. Runs on the urldedupe output when available, wayback otherwise.',
-      note: `Saved to targets/${t.id}/gf_<pattern>.txt · requires gf + Gf-Patterns installed on this machine`,
-      statusText: statusFor(gfRes.ran, gfMatches.length, 'matches found'),
-      updatedAt: gfRes.updated_at,
-      items: gfMatches,
       disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
     }),
     toolCardHTML({
@@ -866,9 +798,9 @@ async function renderMain() {
       subs, subfinderSubs, liveHosts, httpxSplit, wafRows,
       wafWith: wafFilterRes.with_waf || [], wafWithout: wafFilterRes.no_waf || [],
       katanaUrls, jsFiles,
-      jsUrlsFound, jsSecretFindings, jsParamUrls, gfTagged: gfFilterRes.matches || [], gfSummary: gfSummaryLines,
+      jsUrlsFound, jsSecretFindings, jsParamUrls,
       ports, dnsRecords, whoisLines, endpoints,
-      waybackUrls, uroUrls, urldedupeUrls, urlPatterns, gfMatches, paramUrls,
+      waybackUrls, uroUrls, urldedupeUrls, urlPatterns, paramUrls,
       techLines, xssFindings
     });
   });
@@ -884,8 +816,6 @@ async function renderMain() {
   wireToolCard('jsurls', jsUrlsFound, () => runTool({ key: 'jsurls', endpoint: 'jsluice_urls', t }));
   wireToolCard('jssecrets', jsSecretFindings, () => runTool({ key: 'jssecrets', endpoint: 'jsluice_secrets', t }));
   wireToolCard('jsparams', jsParamUrls, () => runTool({ key: 'jsparams', endpoint: 'js_params', t }));
-  wireToolCard('gffilter', gfFilterRes.matches || [], () => runTool({ key: 'gffilter', endpoint: 'gf_filter', t }));
-  wireToolCard('gfsummary', gfSummaryLines, () => runTool({ key: 'gfsummary', endpoint: 'gf_summary', t }));
   wireToolCard('portscan', ports, () => runTool({ key: 'portscan', endpoint: 'portscan', t }));
   wireToolCard('endpoints', endpoints, () => runTool({ key: 'endpoints', endpoint: 'endpoints', t }));
   wireToolCard('dns', dnsRecords, () => runTool({ key: 'dns', endpoint: 'dns', t }));
@@ -895,7 +825,6 @@ async function renderMain() {
   wireToolCard('uro', uroUrls, () => runTool({ key: 'uro', endpoint: 'uro', t }));
   wireToolCard('urldedupe', urldedupeUrls, () => runTool({ key: 'urldedupe', endpoint: 'urldedupe', t }));
   wireToolCard('urlpatterns', urlPatterns, () => runTool({ key: 'urlpatterns', endpoint: 'urlpatterns', t }));
-  wireToolCard('gf', gfMatches, () => runTool({ key: 'gf', endpoint: 'gf', t }));
   wireToolCard('allparams', paramUrls, () => runTool({ key: 'allparams', endpoint: 'all_params', t }));
   wireToolCard('xssprobe', xssFindings, () => runTool({ key: 'xssprobe', endpoint: 'xssprobe', t }));
 

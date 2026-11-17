@@ -3,7 +3,7 @@ JS Parameter Collector - PASSIVE, zero network calls (pure file merge).
 
 Aggregates every parameterized URL discovered during the JS-analysis
 phase into the shared all_params.txt worklist for the next phase
-(gf filtering, XSS prober, vuln_scan):
+(XSS prober, vuln_scan):
 
   - jsluice_urls.txt  - URLs/params extracted from JS source
                         (fetch calls, redirects, API paths)
@@ -76,5 +76,5 @@ def run(domain: str, target_path: str) -> dict:
         "count": len(param_urls),
         "combined": len(combined),
         "sources": sources,
-        "note": "Ready for the active-testing phase (gf / XSS Prober / vuln_scan).",
+        "note": "Ready for the active-testing phase (XSS Prober / vuln_scan).",
     }

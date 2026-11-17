@@ -94,22 +94,7 @@ Recon Framework - Tools / APIs Used Per Module
    Output: urldedupe.txt - unique URLs only
    Note: runs alongside module 9 (uro_filter). Both stay available.
 
-13) URL Pattern Extraction (gf)
-   File: backend/modules/recon/gf_extractor.py
-   Type: PASSIVE, zero network calls (re-reads urldedupe.txt from module 12,
-         falling back to wayback.txt from module 7)
-   Tool used:
-     - gf (industry-standard Go CLI, tomnomnom) with the Gf-Patterns set
-       https://github.com/tomnomnom/gf
-       install: go install -v github.com/tomnomnom/gf@latest
-       patterns: git clone https://github.com/1ndianl33t/Gf-Patterns ~/.gf/patterns
-   Command: for pattern in xss, sqli, ssrf, lfi, rce, redirect, idor,
-   debug_logic: pipe input URLs into `gf <pattern>`
-   Output: gf_<pattern>.txt per category (gf_xss.txt, gf_sqli.txt, ...)
-   Note: runs alongside module 8 (url_pattern_filter). Pattern names match
-   module 8's categories so downstream modules can consume either output.
-
-14) Parameter Collector
+13) Parameter Collector
    File: backend/modules/recon/param_collector.py
    Type: PASSIVE, zero network calls (pure file merge)
    Reads: subfinder.txt (module 11) + cleaned URLs - urldedupe.txt
@@ -123,7 +108,7 @@ Recon Framework - Tools / APIs Used Per Module
      themselves.
 
 
-15) Live Host Discovery (httpx)
+14) Live Host Discovery (httpx)
    File: backend/modules/recon/httpx_live.py
    Type: ACTIVE (sends HTTP requests to every subdomain found)
    Tool used:
@@ -139,13 +124,13 @@ Recon Framework - Tools / APIs Used Per Module
    IMPORTANT: on purpose it does NOT keep only 200 OK - 401/403
      (access-restricted) and 404 hosts are kept too because they are
      often the most interesting attack surfaces. Filtering happens
-     later, in module 16.
+     later, in module 15.
 
-16) Live Host Status-Code Splitter
+15) Live Host Status-Code Splitter
    File: backend/modules/recon/httpx_filter.py
-   Type: PASSIVE, zero network calls (re-reads live_hosts.txt from module 15)
+   Type: PASSIVE, zero network calls (re-reads live_hosts.txt from module 14)
    Method: splits live_hosts.txt by the status code annotated in each
-     httpx line; code set mirrors module 15's -mc list
+     httpx line; code set mirrors module 14's -mc list
    Output: live_200.txt, live_301.txt, live_302.txt, live_401.txt,
      live_403.txt, live_404.txt (a file per code, only written when hits
      exist; stale files from previous runs are cleaned)
@@ -153,7 +138,7 @@ Recon Framework - Tools / APIs Used Per Module
      hosts exist but are access-restricted, usually worth a manual look.
 
 
-17) Web Crawling (katana)
+16) Web Crawling (katana)
    File: backend/modules/recon/katana_crawl.py
    Type: ACTIVE (crawls the target's live web servers)
    Tool used:
@@ -164,22 +149,22 @@ Recon Framework - Tools / APIs Used Per Module
             <target_path>/katana_urls.txt
      -jc  extract + crawl endpoints embedded in JavaScript files
      -d 3 depth cap so crawling cannot recurse forever
-   Reads: live_200.txt (module 16) preferred, live_hosts.txt (module 15)
+   Reads: live_200.txt (module 15) preferred, live_hosts.txt (module 14)
      as fallback (httpx annotations ' [200] [Title]' stripped, URLs only)
    Output: katana_urls.txt - discovered URLs, form entries and
      JS-crawl endpoints, one per line, deduplicated + sorted
 
-18) JavaScript File Extractor
+17) JavaScript File Extractor
    File: backend/modules/recon/js_extractor.py
-   Type: PASSIVE, zero network calls (re-reads katana_urls.txt from module 17)
+   Type: PASSIVE, zero network calls (re-reads katana_urls.txt from module 16)
    Method: keeps only lines ending in .js (incl. .min.js) or carrying a
      query string after .js (.js?ver=...)
    Output: js_files.txt - the JS attack surface: files can hide API
      routes, parameter names and dead code pointing at removed panels.
-     Feeds the active-testing phase alongside all_params.txt (module 14).
+     Feeds the active-testing phase alongside all_params.txt (module 13).
 
 
-19) JavaScript URLs, Paths & Parameters (jsluice urls mode)
+18) JavaScript URLs, Paths & Parameters (jsluice urls mode)
    File: backend/modules/recon/jsluice_urls.py
    Type: ACTIVE-ISH (jsluice itself fetches each JS file listed as a URL)
    Tool used:
@@ -192,7 +177,7 @@ Recon Framework - Tools / APIs Used Per Module
      -I / --ignore-strings: skips bare string literals so results focus
        on URLs actually used in code: fetch() calls, document.location
        assignments, window.open(), XHR / jquery patterns.
-   Reads: js_files.txt (module 18)
+   Reads: js_files.txt (module 17)
    Output:
      jsluice_urls.json  -> raw JSON lines per match (url, queryParams,
                            method, type, filename, source)
@@ -201,17 +186,17 @@ Recon Framework - Tools / APIs Used Per Module
    Note: concatenated expressions become EXTR placeholders - the
      parameter NAMES are still valid targets for the active phase.
 
-20) JavaScript Secrets (jsluice secrets mode)
+19) JavaScript Secrets (jsluice secrets mode)
    File: backend/modules/recon/jsluice_secrets.py
    Type: ACTIVE-ISH (jsluice itself fetches each JS file listed as a URL)
    Tool used:
-     - jsluice (Bishop Fox) - same binary as module 19, `secrets` mode:
+     - jsluice (Bishop Fox) - same binary as module 18, `secrets` mode:
        built-in extractors flag AWS keys, GCP keys, GitHub tokens,
        Firebase configs, and other sensitive data. Custom extra
        patterns are supported via jsluice's -p/--patterns JSON flag
        (wired up later if needed).
    Command: jsluice secrets   (JS file/URL list piped in via stdin)
-   Reads: js_files.txt (module 18)
+   Reads: js_files.txt (module 17)
    Output:
      jsluice_secrets.json          -> raw JSON lines (kind, severity,
                                       filename, data, context)
@@ -220,60 +205,19 @@ Recon Framework - Tools / APIs Used Per Module
    Note: findings are SIGNALS - verify each one manually before
      reporting. Never rely on a filename-only triage here.
 
-21) JS Parameter Collector
+20) JS Parameter Collector
    File: backend/modules/recon/js_param_collector.py
    Type: PASSIVE, zero network calls (pure file merge)
-   Reads: jsluice_urls.txt (module 19) + katana_urls.txt (module 17)
-     + existing all_params.txt (module 14's output is preserved so the
+   Reads: jsluice_urls.txt (module 18) + katana_urls.txt (module 16)
+     + existing all_params.txt (module 13's output is preserved so the
      two collectors COMPOSE instead of overwriting each other)
    Method: keeps only lines containing '?', deduplicates, writes the
      consolidated worklist back to all_params.txt
-   Output: all_params.txt - shared input for gf (module 13), the XSS
+   Output: all_params.txt - shared input for the XSS
      Prober (module 10) and the future vuln_scan phase.
 
 
-22) GF Parameter Filtering (all_params worklist)
-   File: backend/modules/recon/gf_filter.py
-   Type: PASSIVE, zero network calls (gf is a local pattern matcher)
-   Tool used:
-     - gf (GoFish, tomnomnom) with the community Gf-Patterns set
-       https://github.com/tomnomnom/gf
-       install: go install -v github.com/tomnomnom/gf@latest
-       patterns REQUIRED (gf loads them from ~/.gf, one level):
-         git clone https://github.com/1ndianl33t/Gf-Patterns
-         cp Gf-Patterns/*.json ~/.gf/
-   Purpose: gf tags URLs on parameter names and file extensions - a URL
-     with ?q= or ?search= lands in the "xss" category, ?id= in "sqli"/
-     "idor", ?path=/ ?file= in "lfi", .php/.bak/.env extensions in
-     "interesting_ext", etc.
-   Command: for pattern in xss, sqli, ssrf, lfi, rce, idor, redirect,
-     debug_logic, interesting_ext: pipe all_params.txt into `gf <pattern>`
-     (gf reads stdin). Canonical Gf-Patterns filenames are tried first,
-     with aliases as fallback (the set ships interestingEXT.json).
-   Reads: all_params.txt (module 21/14 combined worklist)
-   Output: gf_<pattern>.txt per category (same downstream filenames as
-     module 13, so the XSS Prober keeps reading gf_xss.txt); response
-     carries per-pattern counts. Missing patterns are reported as a
-     warning instead of failing the run.
-   Note: differs from module 13 only in INPUT (wayback/urldedupe URLs
-     there, the merged JS-phase worklist here) - module 13 stays intact.
-     Prerequisite: ~user/.gf exists and contains .json pattern files;
-     otherwise the module refuses to run with install instructions.
-
-23) GF Summary Report
-   File: backend/modules/recon/gf_summary.py
-   Type: PASSIVE, zero network calls
-   Method: scans every gf_*.txt in the target folder, one count per
-     pattern, plus a "priority review" note (rce/sqli/xss first).
-   Output: gf_summary.txt, e.g.
-       # gf summary - example.com
-       xss: 12
-       sqli: 8
-   Exposed via GET/POST /api/targets/<id>/gf_summary so the frontend
-     renders the counts as colored badges without reading files.
-
-
-24) WAF Detection (wafw00f)
+21) WAF Detection (wafw00f)
    File: backend/modules/recon/waf_detect.py
    Type: ACTIVE (sends a handful of crafted requests to each live host)
    Tool used:
@@ -284,7 +228,7 @@ Recon Framework - Tools / APIs Used Per Module
      (wafw00f reads targets from a file with -i; -o + -f json request its
      structured output. The scan runs ONCE - the text outputs are derived
      from that JSON instead of re-scanning for a second format.)
-   Reads: live_200.txt (module 16) preferred, live_hosts.txt (module 15)
+   Reads: live_200.txt (module 14) preferred, live_hosts.txt (module 15)
      as fallback (httpx annotations stripped, bare URLs only)
    Purpose: fingerprints the WAF in front of each host - Cloudflare,
      Akamai, AWS WAF, Imperva, generic - so active testing knows which
@@ -297,9 +241,9 @@ Recon Framework - Tools / APIs Used Per Module
    Return: {detected, not_detected, wafs_found: [..], unreachable: n} -
      hosts with no result vs. input are flagged as unreachable.
 
-25) WAF Filter (split by WAF presence)
+22) WAF Filter (split by WAF presence)
    File: backend/modules/recon/waf_filter.py
-   Type: PASSIVE, zero network calls (re-reads waf_summary.txt, module 24)
+   Type: PASSIVE, zero network calls (re-reads waf_summary.txt, module 21)
    Method: parses "URL | WAF | Yes/No" rows (malformed rows tolerated)
    Output:
      hosts_with_waf.txt - WAF-protected: treat with care during active
