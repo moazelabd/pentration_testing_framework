@@ -11,7 +11,7 @@ let uiState = {
     subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
     portscan: false, endpoints: false,
     dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-    urldedupe: false, urlpatterns: false, xssprobe: false, allparams: false,
+    urldedupe: false, urlpatterns: false, xssprobe: false, cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
     katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
     wafdetect: false, waffilter: false
   }
@@ -24,7 +24,7 @@ function resetUiState() {
       subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
       portscan: false, endpoints: false,
       dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-      urldedupe: false, urlpatterns: false, xssprobe: false, allparams: false,
+      urldedupe: false, urlpatterns: false, xssprobe: false, cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
       katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
       wafdetect: false, waffilter: false
     }
@@ -62,11 +62,15 @@ const RUN_ALL_ORDER = [
 ];
 
 // Tools that belong to the Vulnerability Scan section (everything else is Recon).
-const VULN_TOOL_KEYS = ['urlpatterns', 'jssecrets', 'xssprobe'];
+const VULN_TOOL_KEYS = ['cvenvd', 'cvecircl', 'cvemerge', 'urlpatterns', 'jssecrets', 'xssprobe'];
 
 // Run order for the Vulnerability Scan section's "Run All".
-//   URL Pattern Filter -> XSS Reflection Prober ; JS Secrets (needs JS Extractor from Recon)
+//   CVE lookups (passive, need versions from Recon) -> merge -> URL Pattern Filter ->
+//   JS Secrets (needs JS Extractor from Recon) -> XSS Prober (active, last)
 const VULN_RUN_ALL_ORDER = [
+  { key: 'cvenvd', endpoint: 'cve_nvd' },
+  { key: 'cvecircl', endpoint: 'cve_circl' },
+  { key: 'cvemerge', endpoint: 'cve_merge' },
   { key: 'urlpatterns', endpoint: 'urlpatterns' },
   { key: 'jssecrets', endpoint: 'jsluice_secrets' },
   { key: 'xssprobe', endpoint: 'xssprobe' },
@@ -132,6 +136,8 @@ const LOW_TAGS = ['redirect', 'interesting_ext'];
 // Classifies a result line so dangerous/noteworthy findings stand out from
 // routine output instead of every line looking the same shade of gray.
 function severityClass(line) {
+  const cve = line.match(/^CVE-\d{4}-\d+\s+(CRITICAL|HIGH|MEDIUM|LOW)\b/i);
+  if (cve) return 'sev-' + cve[1].toLowerCase();
   if (/UNESCAPED|SUCCEEDED/.test(line)) return 'sev-danger';
   if (/escaped \(likely safe\)|refused\/failed/.test(line)) return 'sev-safe';
 
@@ -324,6 +330,9 @@ function buildReportMarkdown(t, data) {
   md += reportSection('Parameter Collector (all_params)', data.paramUrls);
   md += reportSection('Tech Fingerprint + TLS', data.techLines);
   md += reportSection('XSS Reflection Prober (dalfox-inspired)', data.xssFindings);
+  md += reportSection('CVEs - merged (NVD + CIRCL)', data.cveMergedLines);
+  md += reportSection('CVE Lookup (NVD)', data.cveNvdLines);
+  md += reportSection('CVE Lookup (CIRCL)', data.cveCirclLines);
   return md;
 }
 
@@ -456,7 +465,7 @@ async function renderMain() {
     return;
   }
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -479,6 +488,9 @@ async function renderMain() {
     fetch(`${API}/${t.id}/js_params`).then(r => r.json()),
     fetch(`${API}/${t.id}/waf`).then(r => r.json()),
     fetch(`${API}/${t.id}/waf_filter`).then(r => r.json()),
+    fetch(`${API}/${t.id}/cve_nvd`).then(r => r.json()),
+    fetch(`${API}/${t.id}/cve_circl`).then(r => r.json()),
+    fetch(`${API}/${t.id}/cve_merge`).then(r => r.json()),
   ]);
 
   const subs = subRes.subdomains || [];
@@ -501,6 +513,9 @@ async function renderMain() {
   const jsUrlsFound = jsUrlsRes.urls || [];
   const jsSecretFindings = jsSecretsRes.findings || [];
   const jsParamUrls = jsParamsRes.urls || [];
+  const cveNvdLines = cveNvdRes.cves || [];
+  const cveCirclLines = cveCirclRes.cves || [];
+  const cveMergedLines = cveMergeRes.cves || [];
   const wafRows = wafRes.rows || [];
   const wafStatusText = wafRes.ran
     ? `${wafRes.detected || 0} host(s) behind WAF${(wafRes.wafs_found || []).length ? ': ' + wafRes.wafs_found.join(', ') : ''} · ${wafRes.not_detected || 0} without WAF`
@@ -533,6 +548,7 @@ async function renderMain() {
     { label: 'Pattern matches', value: urlPatterns.length },
     { label: 'Param URLs', value: paramUrls.length },
     { label: 'XSS findings', value: xssFindings.length, danger: true },
+    { label: 'CVEs (merged)', value: cveMergeRes.count || 0, danger: true },
   ];
   const statsBarHTML = `
     <div class="stats-bar">
@@ -645,12 +661,12 @@ async function renderMain() {
     toolCardHTML({
       key: 'jsextract',
       title: 'JS File Extractor',
-      description: 'Merges the pure .js file URLs (including .js?query=) from the katana crawl AND the Wayback Machine results into one deduplicated list - JS files can hide API routes, parameter names and dead-code panels. Passive, zero traffic - run the Katana Crawler and/or Wayback Machine URLs first.',
+      description: 'Pulls the pure .js file URLs (including .js?query=) out of the katana results - JS files can hide API routes, parameter names and dead-code panels. Passive, zero traffic - run the Katana Crawler first.',
       note: `Saved to targets/${t.id}/js_files.txt`,
       statusText: statusFor(jsRes.ran, jsFiles.length, 'JS files found'),
       updatedAt: jsRes.updated_at,
       items: jsFiles,
-      disabledReason: !katanaRes.ran && !waybackRes.ran ? 'Run "Web Crawler (katana)" or "Wayback Machine URLs" first' : null
+      disabledReason: !katanaRes.ran ? 'Run "Web Crawler (katana)" first' : null
     }),
     toolCardHTML({
       key: 'jsurls',
@@ -734,6 +750,42 @@ async function renderMain() {
     }),
   ].join(''));
 
+  const needVersions = !techRes.ran && !httpxLiveRes.ran
+    ? 'Run "Tech Fingerprint" or "Live Host Probe" first' : null;
+
+  const vulnCveGroup = toolGroupHTML('CVE Lookup', [
+    toolCardHTML({
+      key: 'cvenvd',
+      title: 'CVE Lookup (NVD)',
+      description: 'Takes the product + version pairs found by Tech Fingerprint / Live Host Probe (e.g. nginx 1.18.0) and asks NIST NVD which CVEs affect that exact version. Passive - nothing is sent to the target. Slow on purpose (NVD limits free use to ~5 requests / 30s). Needs a visible version number: CDN-hidden servers give nothing.',
+      note: `Saved to targets/${t.id}/cve_nvd.txt (records: cve_nvd.json)`,
+      statusText: statusFor(cveNvdRes.ran, cveNvdRes.count || 0, 'CVE(s) found'),
+      updatedAt: cveNvdRes.updated_at,
+      items: cveNvdLines,
+      disabledReason: needVersions
+    }),
+    toolCardHTML({
+      key: 'cvecircl',
+      title: 'CVE Lookup (CIRCL)',
+      description: 'Second, independent source: CIRCL Vulnerability-Lookup. Downloads the CVEs of each detected product and keeps only those whose affected-version ranges include the version found on the target. Passive. Run it next to NVD, then use CVE Merge.',
+      note: `Saved to targets/${t.id}/cve_circl.txt (records: cve_circl.json)`,
+      statusText: statusFor(cveCirclRes.ran, cveCirclRes.count || 0, 'CVE(s) found'),
+      updatedAt: cveCirclRes.updated_at,
+      items: cveCirclLines,
+      disabledReason: needVersions
+    }),
+    toolCardHTML({
+      key: 'cvemerge',
+      title: 'CVE Merge (dedupe)',
+      description: 'Combines the NVD and CIRCL results into one list: the same CVE found by both sources becomes a single line (sources and affected products are combined, the highest CVSS score is kept), sorted by severity. No network calls.',
+      note: `Saved to targets/${t.id}/cve_merged.txt (records: cve_merged.json)`,
+      statusText: statusFor(cveMergeRes.ran, cveMergeRes.count || 0, 'unique CVE(s)'),
+      updatedAt: cveMergeRes.updated_at,
+      items: cveMergedLines,
+      disabledReason: (!cveNvdRes.ran && !cveCirclRes.ran) ? 'Run a CVE lookup (NVD or CIRCL) first' : null
+    }),
+  ].join(''));
+
   const vulnTriageGroup = toolGroupHTML('Triage & Secrets', [
     toolCardHTML({
       key: 'urlpatterns',
@@ -808,6 +860,7 @@ async function renderMain() {
       </div>
       <div id="run-all-vuln-status" class="run-all-status"></div>
       <div class="section-body" id="section-vuln-body" style="${vulnOpen ? '' : 'display:none;'}">
+        ${vulnCveGroup}
         ${vulnTriageGroup}
         ${vulnActiveGroup}
       </div>
@@ -846,7 +899,8 @@ async function renderMain() {
       jsUrlsFound, jsSecretFindings, jsParamUrls,
       ports, dnsRecords, whoisLines, endpoints,
       waybackUrls, uroUrls, urldedupeUrls, urlPatterns, paramUrls,
-      techLines, xssFindings
+      techLines, xssFindings,
+      cveNvdLines, cveCirclLines, cveMergedLines
     });
   });
 
@@ -872,6 +926,9 @@ async function renderMain() {
   wireToolCard('urlpatterns', urlPatterns, () => runTool({ key: 'urlpatterns', endpoint: 'urlpatterns', t }));
   wireToolCard('allparams', paramUrls, () => runTool({ key: 'allparams', endpoint: 'all_params', t }));
   wireToolCard('xssprobe', xssFindings, () => runTool({ key: 'xssprobe', endpoint: 'xssprobe', t }));
+  wireToolCard('cvenvd', cveNvdLines, () => runTool({ key: 'cvenvd', endpoint: 'cve_nvd', t }));
+  wireToolCard('cvecircl', cveCirclLines, () => runTool({ key: 'cvecircl', endpoint: 'cve_circl', t }));
+  wireToolCard('cvemerge', cveMergedLines, () => runTool({ key: 'cvemerge', endpoint: 'cve_merge', t }));
 
 }
 

@@ -7,7 +7,9 @@ Werkzeug>=3.0.4
 requests>=2.32.3
 urllib3>=2.2.3
 aiohttp>=3.10.10
-httpx>=0.27.2
+# NOTE: do NOT add the Python "httpx" package here. The Live Host Probe needs
+# ProjectDiscovery's httpx (a Go program - see README, "External CLI tools"), and
+# pip's httpx installs a different command with the same name.
 
 # --- Network, DNS & WHOIS ---
 python-nmap>=0.7.1

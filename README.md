@@ -16,7 +16,7 @@ capstone_prj/
 │   ├── requirements.txt
 │   ├── modules/
 │   │   ├── recon/           # one file per recon tool
-│   │   └── vuln_scan/       # URL pattern filter, JS secrets, XSS prober (+ planned modules)
+│   │   └── vuln_scan/       # CVE lookup (NVD + CIRCL + merge), URL pattern filter, JS secrets, XSS prober (+ planned modules)
 │   └── targets/              # one folder per target, created automatically
 └── frontend/
     ├── index.html
@@ -48,7 +48,7 @@ Most tools run independently. The dependent ones build chains, in order -
 the UI disables a tool's Run button until its prerequisite has run:
 
 ```
-Subfinder (+ Subdomain Enumeration) -> Live Host Probe (httpx) -> Live Host Filter -> Web Crawler (katana) -> JS File Extractor (katana + Wayback) -> jsluice (urls/secrets) -> JS Parameter Collector
+Subfinder (+ Subdomain Enumeration) -> Live Host Probe (httpx) -> Live Host Filter -> Web Crawler (katana) -> JS File Extractor -> jsluice (urls/secrets) -> JS Parameter Collector
                        \-> WAF Detection (wafw00f) -> WAF Filter
 Wayback Machine URLs -> URL Cleaner (uro)   -> URL Pattern Filter -> XSS Reflection Prober
                      -> URL Dedupe (urldedupe) -> Parameter Collector
@@ -58,8 +58,8 @@ Wayback Machine URLs -> URL Cleaner (uro)   -> URL Pattern Filter -> XSS Reflect
 **Run All** (top of the Recon section) runs every tool in this safe order
 automatically, skipping past any tool that fails.
 
-The **Vulnerability Scan** section has its own **Run All** (URL Pattern Filter -> JS Secrets -> XSS Prober).
-It relies on Recon results, so run Recon first.
+The **Vulnerability Scan** section has its own **Run All** (CVE NVD -> CVE CIRCL -> CVE Merge -> URL Pattern Filter ->
+JS Secrets -> XSS Prober). It relies on Recon results, so run Recon first.
 
 The target page has two collapsible sections.
 
@@ -67,8 +67,8 @@ The target page has two collapsible sections.
 **Content & URL Analysis** (WAF Detection/Filter, Katana, JS Extractor, jsluice URLs, JS Parameter Collector,
 Endpoints, Wayback, uro, urldedupe, Parameter Collector) and **Fingerprinting** (Tech Fingerprint + TLS).
 
-**Vulnerability Scan** - **Triage & Secrets** (URL Pattern Filter, JS Secrets via jsluice) and
-**Active Testing** (XSS Reflection Prober).
+**Vulnerability Scan** - **CVE Lookup** (NVD, CIRCL, Merge), **Triage & Secrets** (URL Pattern Filter, JS Secrets via
+jsluice) and **Active Testing** (XSS Reflection Prober).
 
 ## External CLI tools (optional but recommended)
 
@@ -80,22 +80,8 @@ go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install -v github.com/projectdiscovery/katana/cmd/katana@latest
 go install github.com/BishopFox/jsluice/cmd/jsluice@latest
+go install -v github.com/ameenmaali/urldedupe@latest
 pip install wafw00f
-```
-
-**urldedupe is a C++ project, not Go** - build it from source:
-
-```bash
-git clone https://github.com/ameenmaali/urldedupe
-cd urldedupe
-g++ -std=c++17 -O2 -o ~/go/bin/urldedupe main.cpp utils.cpp flags.cpp Url.cpp
-```
-
-If `go install` fails with `sum.golang.org: connection refused`
-(blocked network), retry with the checksum DB disabled:
-
-```bash
-GOSUMDB=off go install <the module>@latest
 ```
 
 nmap stays a separate package install (`apt install nmap`). If a CLI tool
@@ -111,7 +97,7 @@ the rest of the pipeline keeps working.
 | Live Host Probe (httpx) | active | Industry-standard `httpx` CLI - probes every subdomain, keeps 200/301/302/401/403/404 with titles + tech. Needs httpx on your PATH |
 | Live Host Filter (403/404 Split) | passive | Splits live_hosts.txt into live_<code>.txt files for per-status triage |
 | Web Crawler (katana) | active | Industry-standard `katana` CLI - depth-3 crawl of live 200 hosts, extracts URLs/forms/JS endpoints (-jc). Needs katana on your PATH |
-| JS File Extractor | passive | Merges the .js URLs (incl. .js?query) from the katana crawl AND the Wayback Machine results into one deduplicated js_files.txt |
+| JS File Extractor | passive | Keeps the .js URLs (incl. .js?query) from katana output into js_files.txt |
 | JS URLs (jsluice) | active-ish | `jsluice urls -I` (Bishop Fox, tree-sitter) - real fetch/redirect/API URLs + params from JS, not regex |
 | JS Secrets (jsluice) | active-ish | `jsluice secrets` - AWS/GCP/GitHub/Firebase tokens and keys leaked in JS, per-finding severity summary |
 | JS Parameter Collector | passive | Merges jsluice + katana + existing params into all_params.txt (input for active testing) |
@@ -127,14 +113,17 @@ the rest of the pipeline keeps working.
 | URL Pattern Filter | passive | Tags URLs: xss, sqli, ssrf, lfi, rce, idor, redirect, debug_logic, interesting_ext || URL Dedupe (urldedupe) | passive | Industry-standard `urldedupe` CLI - collapses near-duplicate URLs from wayback.txt |
 | Parameter Collector | passive | Merges subfinder + cleaned URLs, keeps only `?parameterized` URLs into all_params.txt (worklist for the active-testing phase) |
 | XSS Reflection Prober (dalfox-inspired) | active | Injects a marker per param, flags unescaped reflections (signal, not proof) |
+| CVE Lookup (NVD) | passive | Looks up the product + version pairs found by Tech Fingerprint / Live Host Probe (e.g. nginx 1.18.0) in NIST NVD. Nothing is sent to the target. ~6.5s per request without a key - set `NVD_API_KEY` to speed up |
+| CVE Lookup (CIRCL) | passive | Same input, second independent source (CIRCL Vulnerability-Lookup): fetches the product's CVEs and keeps those whose affected-version ranges include the detected version |
+| CVE Merge | passive | Combines NVD + CIRCL results: one line per CVE (duplicates removed, sources combined, highest CVSS kept), sorted by severity |
 
 Results save to `backend/targets/<target-id>/*.txt`, one file per tool.
 
 ## What's next (not built yet)
 
 `backend/modules/vuln_scan/` already holds `url_pattern_filter.py`, `jsluice_secrets.py` and
-`xss_prober.py`. Still planned: `nse_vuln_scripts.py`, `tls_checks.py`, `web_misconfig.py`,
-`cve_lookup.py`. The **Monitoring** button is also just a placeholder for now.
+`xss_prober.py`, plus `cve_nvd.py`, `cve_circl.py`, `cve_merge.py` (shared helpers in `cve_common.py`).
+Still planned: `nse_vuln_scripts.py`, `tls_checks.py`, `web_misconfig.py`. The **Monitoring** button is also just a placeholder for now.
 
 ## Adding a new tool
 
@@ -159,6 +148,9 @@ Results save to `backend/targets/<target-id>/*.txt`, one file per tool.
 | GET/POST | `/api/targets/<id>/js_extractor` | JS File Extractor |
 | GET/POST | `/api/targets/<id>/jsluice_urls` | JS URLs + parameters (jsluice) |
 | GET/POST | `/api/targets/<id>/jsluice_secrets` | JS secrets (jsluice) |
+| GET/POST | `/api/targets/<id>/cve_nvd` | CVE Lookup (NVD) |
+| GET/POST | `/api/targets/<id>/cve_circl` | CVE Lookup (CIRCL) |
+| GET/POST | `/api/targets/<id>/cve_merge` | CVE Merge (dedupe) |
 | GET/POST | `/api/targets/<id>/js_params` | JS Parameter Collector |
 | GET/POST | `/api/targets/<id>/portscan` | Port Scan |
 | GET/POST | `/api/targets/<id>/endpoints` | Endpoint Discovery |

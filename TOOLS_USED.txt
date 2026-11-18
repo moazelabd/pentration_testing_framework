@@ -156,16 +156,12 @@ Recon Framework - Tools / APIs Used Per Module
 
 17) JavaScript File Extractor
    File: backend/modules/recon/js_extractor.py
-   Type: PASSIVE, zero network calls (re-reads katana_urls.txt from
-     module 16 + urldedupe.txt (module 12) / wayback.txt (module 7))
+   Type: PASSIVE, zero network calls (re-reads katana_urls.txt from module 16)
    Method: keeps only lines ending in .js (incl. .min.js) or carrying a
-     query string after .js (.js?ver=...), merges all sources and
-     deduplicates
+     query string after .js (.js?ver=...)
    Output: js_files.txt - the JS attack surface: files can hide API
      routes, parameter names and dead code pointing at removed panels.
-     Katana alone is enough to run; the Wayback sources are merged in
-     automatically when present. Feeds the active-testing phase
-     alongside all_params.txt (module 13).
+     Feeds the active-testing phase alongside all_params.txt (module 13).
 
 
 18) JavaScript URLs, Paths & Parameters (jsluice urls mode)
@@ -254,6 +250,31 @@ Recon Framework - Tools / APIs Used Per Module
        testing, they may block probes - prioritize less
      hosts_no_waf.txt   - unfiltered: safe-ish for the XSS Prober and
        future vuln_scan modules
+
+23) CVE Lookup (NVD)
+   File: backend/modules/vuln_scan/cve_nvd.py   (shared helpers: cve_common.py)
+   Type: PASSIVE toward the target (queries a public API only)
+   Source: NIST NVD CVE API 2.0  https://services.nvd.nist.gov/rest/json/cves/2.0
+   Input: product + version pairs parsed from techinfo.txt (Server / X-Powered-By /
+     generator) and live_hosts.txt (httpx -tech-detect). Only products with a known
+     CPE mapping are looked up (nginx, Apache httpd, PHP, OpenSSL, IIS, WordPress, jQuery...).
+   Limits: ~5 requests / 30s without a key (tool waits ~6.5s); set NVD_API_KEY for more.
+   Output: cve_nvd.txt (display) + cve_nvd.json (records for the merge step)
+
+24) CVE Lookup (CIRCL)
+   File: backend/modules/vuln_scan/cve_circl.py
+   Type: PASSIVE toward the target
+   Source: CIRCL Vulnerability-Lookup  https://vulnerability.circl.lu/api/vulnerability/search/<vendor>/<product>
+   Method: CIRCL searches by vendor/product, not version, so affected-version ranges
+     in each CVE record are checked locally against the detected version.
+   Output: cve_circl.txt + cve_circl.json
+
+25) CVE Merge
+   File: backend/modules/vuln_scan/cve_merge.py
+   Type: PASSIVE, zero network calls (reads cve_nvd.json and cve_circl.json)
+   Method: same CVE id from several sources -> one record (sources + affected products
+     combined, highest CVSS score kept), sorted by score.
+   Output: cve_merged.txt + cve_merged.json
 
 Core backend stack (not recon-specific):
    - Flask        (web framework / API routes)

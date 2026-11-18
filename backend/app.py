@@ -12,6 +12,8 @@ Run:
 Then open http://localhost:5000 in your browser.
 """
 
+import os
+
 from flask import Flask, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
@@ -26,7 +28,9 @@ from modules.recon import (
     tech_fingerprint, urldedupe_filter,
     uro_filter, waf_detect, waf_filter, wayback_urls, whois_lookup,
 )
-from modules.vuln_scan import jsluice_secrets, url_pattern_filter, xss_prober
+from modules.vuln_scan import (
+    cve_circl, cve_merge, cve_nvd, jsluice_secrets, url_pattern_filter, xss_prober,
+)
 
 app = Flask(__name__, static_folder=storage.FRONTEND_DIR, static_url_path="")
 
@@ -286,7 +290,7 @@ def run_urlpatterns_route(target_id):
     return module_result(url_pattern_filter.run(domain, target_path))
 
 
-# ---------- recon: XSS reflection prober (dalfox-inspired) ----------
+# ---------- vuln scan: XSS reflection prober (dalfox-inspired) ----------
 
 @app.route("/api/targets/<target_id>/xssprobe", methods=["GET"])
 def get_xssprobe(target_id):
@@ -305,6 +309,69 @@ def run_xssprobe_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(xss_prober.run(domain, target_path))
+
+
+# ---------- vuln scan: CVE lookup via NVD ----------
+
+@app.route("/api/targets/<target_id>/cve_nvd", methods=["GET"])
+def get_cve_nvd(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = cve_nvd.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "cve_nvd.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/cve_nvd", methods=["POST"])
+def run_cve_nvd_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(cve_nvd.run(domain, target_path))
+
+
+# ---------- vuln scan: CVE lookup via CIRCL ----------
+
+@app.route("/api/targets/<target_id>/cve_circl", methods=["GET"])
+def get_cve_circl(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = cve_circl.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "cve_circl.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/cve_circl", methods=["POST"])
+def run_cve_circl_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(cve_circl.run(domain, target_path))
+
+
+# ---------- vuln scan: CVE merge (dedupe NVD + CIRCL) ----------
+
+@app.route("/api/targets/<target_id>/cve_merge", methods=["GET"])
+def get_cve_merge(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = cve_merge.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "cve_merged.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/cve_merge", methods=["POST"])
+def run_cve_merge_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(cve_merge.run(domain, target_path))
 
 
 # ---------- recon: subfinder (industry-standard subdomain enum) ----------
