@@ -70,6 +70,22 @@ Endpoints, Wayback, uro, urldedupe, Parameter Collector) and **Fingerprinting** 
 **Vulnerability Scan** - **CVE Lookup** (NVD, CIRCL, Merge), **Triage & Secrets** (URL Pattern Filter, JS Secrets via
 jsluice) and **Active Testing** (XSS Reflection Prober).
 
+## Scanning behind a login (optional)
+
+By default every tool sees the site like an anonymous visitor. On the target page, the **Login session**
+panel lets you add a cookie and/or `Authorization` header of a **test account** so the crawl and probes can
+reach pages that need a login.
+
+1. Log in to the site in your browser with a test account you are allowed to use (never a real user's).
+2. Press `F12` -> **Network** -> click any request to the site -> copy the `Cookie:` line (or the
+   `Authorization: Bearer ...` line) from **Request Headers**.
+3. Paste it in the panel (one header per line) and press **Save**.
+
+It is stored only on your machine in `backend/targets/<id>/auth.txt` (a `.gitignore` next to it keeps it out of
+git) and is sent **only to the target's own domain and subdomains** - never to crt.sh, Wayback, NVD or any other
+site, and it is dropped if a redirect leaves the domain. Used by: Live Host Probe, Katana, Tech Fingerprint,
+Endpoint Discovery and the XSS Reflection Prober. Session cookies expire - paste a fresh one if results stop.
+
 ## External CLI tools (optional but recommended)
 
 The new industry-standard modules need these binaries on your PATH.
@@ -151,6 +167,7 @@ Still planned: `nse_vuln_scripts.py`, `tls_checks.py`, `web_misconfig.py`. The *
 | GET/POST | `/api/targets/<id>/cve_nvd` | CVE Lookup (NVD) |
 | GET/POST | `/api/targets/<id>/cve_circl` | CVE Lookup (CIRCL) |
 | GET/POST | `/api/targets/<id>/cve_merge` | CVE Merge (dedupe) |
+| GET/PUT/DELETE | `/api/targets/<id>/auth` | Optional login cookie / Authorization header (the secret is never returned, only a masked summary) |
 | GET/POST | `/api/targets/<id>/js_params` | JS Parameter Collector |
 | GET/POST | `/api/targets/<id>/portscan` | Port Scan |
 | GET/POST | `/api/targets/<id>/endpoints` | Endpoint Discovery |

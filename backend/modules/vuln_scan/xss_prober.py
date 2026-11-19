@@ -21,6 +21,8 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 import requests
 
+from modules import auth_ctx
+
 USER_AGENT = "recon-framework/1.0"
 MARKER = "zXzPoC1"
 PROBE_SUFFIX = "'\"><"
@@ -74,8 +76,8 @@ def run(domain: str, target_path: str) -> dict:
     if not candidates:
         return {"findings": [], "count": 0, "tested": 0}
 
-    session = requests.Session()
-    session.headers.update({"User-Agent": USER_AGENT})
+    # Adds the target's login cookie / Authorization header (if set) - own domain only.
+    session = auth_ctx.make_session(domain, target_path, USER_AGENT)
 
     findings = []
     tested = 0

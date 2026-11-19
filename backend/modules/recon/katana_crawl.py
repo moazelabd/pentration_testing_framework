@@ -24,6 +24,8 @@ import os
 import subprocess
 import tempfile
 
+from modules import auth_ctx
+
 # Must mirror the depths/flags documented in TOOLS_USED.txt.
 KATANA_ARGS = ["-silent", "-jc", "-d", "3"]
 KATANA_TIMEOUT = 900  # depth-3 crawling many hosts takes a while
@@ -91,7 +93,8 @@ def run(domain: str, target_path: str) -> dict:
 
     try:
         subprocess.run(
-            ["katana", "-list", temp_input, *KATANA_ARGS, "-o", result_path],
+            ["katana", "-list", temp_input, *KATANA_ARGS,
+             *auth_ctx.cli_args(auth_ctx.load(target_path)), "-o", result_path],
             timeout=KATANA_TIMEOUT,
             check=False,  # partial results after an interrupted crawl are still useful
         )

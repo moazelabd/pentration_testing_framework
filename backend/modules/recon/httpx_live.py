@@ -26,6 +26,8 @@ import os
 import re
 import subprocess
 
+from modules import auth_ctx
+
 # Kept as separate strings at module scope so httpx_filter.py can mirror
 # the same set when splitting the output into per-code files.
 STATUS_CODES = "200,301,302,401,403,404"
@@ -167,7 +169,7 @@ def run(domain: str, target_path: str) -> dict:
         # statuses including 401/403/404 (attack surfaces, filter later).
         proc = subprocess.run(
             [httpx_bin, "-silent", "-status-code", "-title", "-tech-detect",
-             "-mc", STATUS_CODES],
+             "-mc", STATUS_CODES, *auth_ctx.cli_args(auth_ctx.load(target_path))],
             input="\n".join(hosts),
             capture_output=True,
             text=True,

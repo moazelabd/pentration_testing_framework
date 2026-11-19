@@ -283,3 +283,16 @@ body { overflow: hidden; }
 .pw-eye { background: var(--panel-bg); border: 1px solid var(--border); color: var(--text-dim); font-family: var(--mono); font-size: 11px; cursor: pointer; margin-left: 6px; padding: 2px 8px; border-radius: 4px; }
 .pw-eye:hover { color: var(--accent); border-color: var(--accent-dim); }
 
+/* Login session (optional auth for a target) */
+.auth-panel { border: 1px solid var(--border-soft); border-radius: 6px; padding: 10px 14px; margin-bottom: 20px; background: var(--panel-bg); }
+.auth-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.auth-label { font-size: 12px; font-weight: 600; color: var(--text); }
+.auth-status { font-size: 12px; color: var(--text-faint); flex: 1; min-width: 160px; }
+.auth-status.on { color: var(--accent); }
+.auth-masked { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); margin-top: 8px; word-break: break-all; }
+.auth-form { margin-top: 10px; }
+.auth-form textarea { width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 8px 10px; font-family: var(--mono); font-size: 12px; resize: vertical; }
+.auth-form textarea:focus { outline: none; border-color: var(--accent-dim); }
+.auth-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 6px; line-height: 1.5; }
+.auth-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.auth-msg { font-size: 12px; color: var(--danger); }

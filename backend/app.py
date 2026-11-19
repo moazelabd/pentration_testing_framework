@@ -28,6 +28,7 @@ from modules.recon import (
     tech_fingerprint, urldedupe_filter,
     uro_filter, waf_detect, waf_filter, wayback_urls, whois_lookup,
 )
+from modules import auth_ctx
 from modules.vuln_scan import (
     cve_circl, cve_merge, cve_nvd, jsluice_secrets, url_pattern_filter, xss_prober,
 )
@@ -99,6 +100,43 @@ def delete_target_route(target_id):
         return jsonify({"error": "not found"}), 404
     storage.delete_target(target_path)
     return jsonify({"ok": True})
+
+
+# ---------- target authentication (optional cookie / Authorization header) ----------
+
+def _auth_summary(target_path):
+    headers = auth_ctx.load(target_path)
+    # the secret itself is never sent back to the browser - only a masked summary
+    return {"has_auth": bool(headers), "headers": auth_ctx.masked(headers)}
+
+
+@app.route("/api/targets/<target_id>/auth", methods=["GET"])
+def get_target_auth(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(_auth_summary(target_path))
+
+
+@app.route("/api/targets/<target_id>/auth", methods=["PUT"])
+def set_target_auth(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    data = request.get_json(silent=True) or {}
+    error = auth_ctx.save(target_path, str(data.get("headers") or ""))
+    if error:
+        return jsonify({"error": error}), 400
+    return jsonify(_auth_summary(target_path))
+
+
+@app.route("/api/targets/<target_id>/auth", methods=["DELETE"])
+def clear_target_auth(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    auth_ctx.save(target_path, "")
+    return jsonify(_auth_summary(target_path))
 
 
 # ---------- recon: subdomains ----------

@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 
 import requests
 
+from modules import auth_ctx
+
 USER_AGENT = "recon-framework/1.0"
 INTERESTING_HEADERS = [
     "Server", "X-Powered-By", "X-AspNet-Version", "X-Generator",
@@ -31,9 +33,8 @@ def get_cached(target_path: str) -> dict:
     return {"techinfo": lines, "ran": ran}
 
 
-def _http_fingerprint(domain: str) -> list:
-    session = requests.Session()
-    session.headers.update({"User-Agent": USER_AGENT})
+def _http_fingerprint(domain: str, target_path: str) -> list:
+    session = auth_ctx.make_session(domain, target_path, USER_AGENT)
 
     resp = None
     for scheme in ("https", "http"):
@@ -94,7 +95,7 @@ def _tls_info(domain: str) -> list:
 
 
 def run(domain: str, target_path: str) -> dict:
-    lines = _http_fingerprint(domain) + _tls_info(domain)
+    lines = _http_fingerprint(domain, target_path) + _tls_info(domain)
 
     with open(os.path.join(target_path, "techinfo.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

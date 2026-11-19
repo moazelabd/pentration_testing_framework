@@ -276,6 +276,13 @@ Recon Framework - Tools / APIs Used Per Module
      combined, highest CVSS score kept), sorted by score.
    Output: cve_merged.txt + cve_merged.json
 
+Authenticated scanning (optional, per target)
+   File: backend/modules/auth_ctx.py
+   A target may carry a Cookie and/or Authorization header of a TEST account (stored in
+   targets/<id>/auth.txt, git-ignored). It is passed to: httpx (-H), katana (-H) and the
+   requests-based modules (Tech Fingerprint, Endpoint Discovery, XSS Prober) - and only for
+   the target's own domain/subdomains. Third-party lookups never receive it.
+
 Core backend stack (not recon-specific):
    - Flask        (web framework / API routes)
    - requests     (HTTP client, used by most modules above)

@@ -6,7 +6,7 @@ let activeId = null;
 // UI collapse/expand state - kept in memory so it survives re-renders
 // (e.g. after running a tool) instead of resetting every time.
 let uiState = {
-  sections: { recon: false, vuln: false },
+  sections: { recon: false, vuln: false, auth: false },
   tools: {
     subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
     portscan: false, endpoints: false,
@@ -19,7 +19,7 @@ let uiState = {
 
 function resetUiState() {
   uiState = {
-    sections: { recon: false, vuln: false },
+    sections: { recon: false, vuln: false, auth: false },
     tools: {
       subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
       portscan: false, endpoints: false,
@@ -115,6 +115,11 @@ function renderSidebar() {
 }
 
 // ---- generic helpers shared by every recon tool card ----
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, ch => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
 
 function toggleBlock(id, open) {
   const el = document.getElementById(id);
@@ -465,7 +470,7 @@ async function renderMain() {
     return;
   }
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes, authRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -491,6 +496,7 @@ async function renderMain() {
     fetch(`${API}/${t.id}/cve_nvd`).then(r => r.json()),
     fetch(`${API}/${t.id}/cve_circl`).then(r => r.json()),
     fetch(`${API}/${t.id}/cve_merge`).then(r => r.json()),
+    fetch(`${API}/${t.id}/auth`).then(r => r.json()),
   ]);
 
   const subs = subRes.subdomains || [];
@@ -822,6 +828,34 @@ async function renderMain() {
     }),
   ].join(''));
 
+  const hasAuth = !!authRes.has_auth;
+  const authOpen = uiState.sections.auth;
+  const authPanelHTML = `
+    <div class="auth-panel">
+      <div class="auth-row">
+        <span class="auth-label">Login session</span>
+        <span class="auth-status ${hasAuth ? 'on' : ''}">${hasAuth
+          ? 'Active - sent only to ' + escapeHtml(t.domain) + ' and its subdomains'
+          : 'None - scanning as an anonymous visitor'}</span>
+        <button id="auth-toggle-btn" class="ghost-btn">${hasAuth ? 'Change' : 'Add'}</button>
+        ${hasAuth ? '<button id="auth-clear-btn" class="ghost-btn">Remove</button>' : ''}
+      </div>
+      ${hasAuth ? `<div class="auth-masked">${(authRes.headers || []).map(h => escapeHtml(h)).join('<br>')}</div>` : ''}
+      <div class="auth-form" id="auth-form" style="${authOpen ? '' : 'display:none;'}">
+        <textarea id="auth-input" rows="3" spellcheck="false" autocomplete="off"
+          placeholder="Cookie: sessionid=abc123; csrftoken=xyz&#10;Authorization: Bearer eyJ..."></textarea>
+        <div class="auth-hint">One header per line (or paste just the cookie string). Use a TEST account you are
+          allowed to use, never a real user's session. Saved only on this machine (git-ignored) and sent only
+          to this target's domain by Live Host Probe, Katana, Tech Fingerprint, Endpoint Discovery and the XSS Prober.
+          Saving replaces the current value.</div>
+        <div class="auth-actions">
+          <button id="auth-save-btn" class="ghost-btn">Save</button>
+          <span id="auth-msg" class="auth-msg"></span>
+        </div>
+      </div>
+    </div>
+  `;
+
   container.innerHTML = `
     <div class="target-header">
       <div class="target-header-top">
@@ -833,6 +867,8 @@ async function renderMain() {
         <button id="export-report-btn" class="ghost-btn export-report-btn">Export Report</button>
       </div>
     </div>
+
+    ${authPanelHTML}
 
     ${statsBarHTML}
 
@@ -890,6 +926,38 @@ async function renderMain() {
     e.stopPropagation();
     runAll(t, VULN_RUN_ALL_ORDER, 'run-all-vuln-btn', 'run-all-vuln-status', 'vuln');
   });
+
+  document.getElementById('auth-toggle-btn').addEventListener('click', () => {
+    uiState.sections.auth = !uiState.sections.auth;
+    document.getElementById('auth-form').style.display = uiState.sections.auth ? '' : 'none';
+  });
+
+  document.getElementById('auth-save-btn').addEventListener('click', async () => {
+    const msg = document.getElementById('auth-msg');
+    const text = document.getElementById('auth-input').value;
+    if (!text.trim()) { msg.textContent = 'Paste a cookie or header first.'; return; }
+    try {
+      const res = await fetch(`${API}/${t.id}/auth`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headers: text }),
+      });
+      const data = await res.json();
+      if (!res.ok) { msg.textContent = data.error || 'Could not save.'; return; }
+      uiState.sections.auth = false;
+      renderMain();
+    } catch (err) {
+      msg.textContent = 'Could not reach the backend.';
+    }
+  });
+
+  const authClear = document.getElementById('auth-clear-btn');
+  if (authClear) {
+    authClear.addEventListener('click', async () => {
+      await fetch(`${API}/${t.id}/auth`, { method: 'DELETE' });
+      renderMain();
+    });
+  }
 
   document.getElementById('export-report-btn').addEventListener('click', () => {
     downloadReport(t, {

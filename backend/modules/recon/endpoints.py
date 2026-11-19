@@ -18,6 +18,8 @@ import re
 
 import requests
 
+from modules import auth_ctx
+
 USER_AGENT = "recon-framework/1.0"
 
 # Quick-check list, not a full brute-force wordlist - it's meant to flag
@@ -73,8 +75,8 @@ def _paths_from_wayback(target_path: str, limit: int = MAX_WAYBACK_PATHS) -> lis
 
 
 def run(domain: str, target_path: str) -> dict:
-    session = requests.Session()
-    session.headers.update({"User-Agent": USER_AGENT})
+    # Adds the target's login cookie / Authorization header (if set) - own domain only.
+    session = auth_ctx.make_session(domain, target_path, USER_AGENT)
 
     working_base = None
     for scheme in ("https", "http"):
