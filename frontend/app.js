@@ -54,7 +54,7 @@ function setTopbar(text) {
 // UI collapse/expand state - kept in memory so it survives re-renders
 // (e.g. after running a tool) instead of resetting every time.
 let uiState = {
-  sections: { recon: false, vuln: false, auth: false },
+  sections: { recon: false, vuln: false, auth: false, aiKey: false },
   tools: {
     subdomains: false, httpxlive: false, httpxfilter: false,
     portscan: false, endpoints: false,
@@ -69,7 +69,7 @@ let uiState = {
 
 function resetUiState() {
   uiState = {
-    sections: { recon: false, vuln: false, auth: false },
+    sections: { recon: false, vuln: false, auth: false, aiKey: false },
     tools: {
       subdomains: false, httpxlive: false, httpxfilter: false,
       portscan: false, endpoints: false,
@@ -176,6 +176,29 @@ function renderSidebar() {
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, ch => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function renderMarkdownLite(md) {
+  // Just enough Markdown to render the AI report: ## headings, **bold**, - lists.
+  // No library (keeps the frontend dependency-free) - escape first, then unescape
+  // only the few tags this function itself introduces.
+  const lines = escapeHtml(md).split('\n');
+  let html = '';
+  let inList = false;
+  const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { closeList(); continue; }
+    const inline = line.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    if (line.startsWith('## ')) { closeList(); html += `<h4>${inline.slice(3)}</h4>`; }
+    else if (line.startsWith('# ')) { closeList(); html += `<h3>${inline.slice(2)}</h3>`; }
+    else if (line.startsWith('- ')) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${inline.slice(2)}</li>`;
+    } else { closeList(); html += `<p>${inline}</p>`; }
+  }
+  closeList();
+  return html;
 }
 
 function toggleBlock(id, open) {
@@ -555,7 +578,7 @@ async function renderMain() {
 
   setTopbar('scan ' + t.domain);
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes, authRes, openRedirRes, sqliRes, lfiRes, tlsRes, webMiscRes, nseVulnRes, subTakeoverRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes, authRes, openRedirRes, sqliRes, lfiRes, tlsRes, webMiscRes, nseVulnRes, subTakeoverRes, openaiKeyRes, aiReportRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -587,6 +610,8 @@ async function renderMain() {
     fetch(`${API}/${t.id}/cve_circl`).then(r => r.json()),
     fetch(`${API}/${t.id}/cve_merge`).then(r => r.json()),
     fetch(`${API}/${t.id}/auth`).then(r => r.json()),
+    fetch('/api/openai-key').then(r => r.json()),
+    fetch(`${API}/${t.id}/ai_report`).then(r => r.json()),
   ]);
 
   const subs = subRes.subdomains || [];
@@ -1025,6 +1050,38 @@ async function renderMain() {
     </div>
   `;
 
+  const hasOpenaiKey = !!openaiKeyRes.has_key;
+  const aiKeyOpen = uiState.sections.aiKey;
+  const aiReport = aiReportRes.report || '';
+  const aiPanelHTML = `
+    <div class="auth-panel">
+      <div class="auth-row">
+        <span class="auth-label">AI Analysis (OpenAI)</span>
+        <span class="auth-status ${hasOpenaiKey ? 'on' : ''}">${hasOpenaiKey
+          ? 'Key saved: ' + escapeHtml(openaiKeyRes.masked || '')
+          : 'No API key saved yet'}</span>
+        <button id="ai-key-toggle-btn" class="ghost-btn">${hasOpenaiKey ? 'Change key' : 'Add key'}</button>
+        ${hasOpenaiKey ? '<button id="ai-key-clear-btn" class="ghost-btn">Remove</button>' : ''}
+      </div>
+      <div class="auth-form" id="ai-key-form" style="${aiKeyOpen ? '' : 'display:none;'}">
+        <textarea id="ai-key-input" rows="1" spellcheck="false" autocomplete="off"
+          placeholder="sk-..."></textarea>
+        <div class="auth-hint">Your own OpenAI API key, used only to run the AI Analysis below. Saved locally on
+          this machine (git-ignored) - never committed, never sent anywhere except api.openai.com. Each person
+          running this framework adds their own key once.</div>
+        <div class="auth-actions">
+          <button id="ai-key-save-btn" class="ghost-btn">Save</button>
+          <span id="ai-key-msg" class="auth-msg"></span>
+        </div>
+      </div>
+      <div class="auth-row" style="margin-top:${hasOpenaiKey ? '10px' : '0'}">
+        ${hasOpenaiKey ? `<button id="ai-report-btn" class="ghost-btn">${aiReport ? 'Re-run AI Analysis' : 'Run AI Analysis'}</button>
+        <span id="ai-report-status" class="auth-msg"></span>` : ''}
+      </div>
+      ${aiReport ? `<div class="ai-report">${renderMarkdownLite(aiReport)}</div>` : ''}
+    </div>
+  `;
+
   container.innerHTML = `
     <div class="target-header">
       <div class="target-header-top">
@@ -1038,6 +1095,7 @@ async function renderMain() {
     </div>
 
     ${authPanelHTML}
+    ${aiPanelHTML}
 
     ${pipelineHTML}
 
@@ -1130,6 +1188,56 @@ async function renderMain() {
     authClear.addEventListener('click', async () => {
       await fetch(`${API}/${t.id}/auth`, { method: 'DELETE' });
       renderMain();
+    });
+  }
+
+  document.getElementById('ai-key-toggle-btn').addEventListener('click', () => {
+    uiState.sections.aiKey = !uiState.sections.aiKey;
+    document.getElementById('ai-key-form').style.display = uiState.sections.aiKey ? '' : 'none';
+  });
+
+  document.getElementById('ai-key-save-btn').addEventListener('click', async () => {
+    const msg = document.getElementById('ai-key-msg');
+    const key = document.getElementById('ai-key-input').value;
+    if (!key.trim()) { msg.textContent = 'Paste your OpenAI API key first.'; return; }
+    try {
+      const res = await fetch('/api/openai-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key }),
+      });
+      const data = await res.json();
+      if (!res.ok) { msg.textContent = data.error || 'Could not save.'; return; }
+      uiState.sections.aiKey = false;
+      renderMain();
+    } catch (err) {
+      msg.textContent = 'Could not reach the backend.';
+    }
+  });
+
+  const aiKeyClear = document.getElementById('ai-key-clear-btn');
+  if (aiKeyClear) {
+    aiKeyClear.addEventListener('click', async () => {
+      await fetch('/api/openai-key', { method: 'DELETE' });
+      renderMain();
+    });
+  }
+
+  const aiReportBtn = document.getElementById('ai-report-btn');
+  if (aiReportBtn) {
+    aiReportBtn.addEventListener('click', async () => {
+      const status = document.getElementById('ai-report-status');
+      aiReportBtn.disabled = true;
+      status.textContent = 'Analyzing... (this can take up to a minute)';
+      try {
+        const res = await fetch(`${API}/${t.id}/ai_report`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) { status.textContent = data.error || 'Analysis failed.'; aiReportBtn.disabled = false; return; }
+        renderMain();
+      } catch (err) {
+        status.textContent = 'Could not reach the backend.';
+        aiReportBtn.disabled = false;
+      }
     });
   }
 

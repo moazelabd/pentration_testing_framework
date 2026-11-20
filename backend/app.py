@@ -29,6 +29,7 @@ from modules.recon import (
     uro_filter, waf_detect, waf_filter, wayback_urls, whois_lookup,
 )
 from modules import auth_ctx
+from modules.ai_analysis import ai_findings
 from modules.vuln_scan import (
     cve_circl, cve_merge, cve_nvd, jsluice_secrets, lfi_prober, nse_vuln_scripts,
     open_redirect_prober, sqli_prober, subdomain_takeover, tls_checks,
@@ -864,6 +865,47 @@ def monitoring_sources_delete(i):
 @app.route("/api/monitoring/alerts", methods=["GET"])
 def monitoring_alerts():
     return jsonify({"items": log_monitor._load(os.path.join(log_monitor.DATA, "alerts.json"), [])})
+
+
+# ---------- AI Analysis (OpenAI key + per-target findings triage) ----------
+
+@app.route("/api/openai-key", methods=["GET"])
+def get_openai_key_status():
+    return jsonify(ai_findings.key_status())
+
+
+@app.route("/api/openai-key", methods=["POST"])
+def set_openai_key():
+    data = request.get_json(force=True, silent=True) or {}
+    error = ai_findings.save_key(str(data.get("key") or ""))
+    if error:
+        return jsonify({"error": error}), 400
+    return jsonify(ai_findings.key_status())
+
+
+@app.route("/api/openai-key", methods=["DELETE"])
+def clear_openai_key():
+    ai_findings.save_key("")
+    return jsonify(ai_findings.key_status())
+
+
+@app.route("/api/targets/<target_id>/ai_report", methods=["GET"])
+def get_ai_report(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = ai_findings.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "ai_report.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/ai_report", methods=["POST"])
+def run_ai_report_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(ai_findings.run(domain, target_path))
 
 
 if __name__ == "__main__":
