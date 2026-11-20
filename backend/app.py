@@ -1,5 +1,5 @@
 """
-Recon Framework - Backend
+Penetration Testing Framework - Backend
 --------------------------
 Flask routes only. Target storage lives in storage.py; each recon tool
 lives in its own file under modules/recon/ (and modules/vuln_scan/ for the

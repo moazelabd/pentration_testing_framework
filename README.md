@@ -1,4 +1,4 @@
-# Recon Framework
+# Penetration Testing Framework
 
 An internal tool for the **recon** phase of authorized penetration tests /
 in-scope bug bounty work. Each target gets a folder on disk with one text
