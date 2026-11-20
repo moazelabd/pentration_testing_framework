@@ -384,6 +384,7 @@ async function runAll(t, order = RUN_ALL_ORDER, btnId = 'run-all-btn', statusId 
         logActivity(`${step.key} failed: ${data.error || 'error'}`, 'a-err');
       } else {
         logResult(step.key, data);
+        uiState.tools[step.key] = true; // auto-expand the card so the result is visible without a manual re-run
       }
     } catch (err) {
       failures.push(`${step.key}: ${err.message}`);
