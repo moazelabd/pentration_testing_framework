@@ -3,6 +3,54 @@ const API = '/api/targets';
 let targets = [];
 let activeId = null;
 
+// ---- running state + live output panel ----
+const runningKeys = new Set();
+const ACTIVITY_MAX = 200;
+// tools that light up a pipeline stage other than their own card
+const STAGE_OF = { subfinder: 'subdomains', httpxfilter: 'httpxlive', cvenvd: 'cvemerge', cvecircl: 'cvemerge' };
+
+function logActivity(text, cls = 'a-info') {
+  const list = document.getElementById('activity-list');
+  if (!list) return;
+  const empty = list.querySelector('.act-empty');
+  if (empty) empty.remove();
+  const row = document.createElement('div');
+  row.className = 'act-row ' + cls;
+  const time = document.createElement('i');
+  time.textContent = new Date().toTimeString().slice(0, 8);
+  row.append(time, document.createTextNode(text)); // text nodes only - no HTML injection
+  list.appendChild(row);
+  while (list.children.length > ACTIVITY_MAX) list.removeChild(list.firstChild);
+  list.scrollTop = list.scrollHeight;
+}
+
+function logResult(key, data) {
+  const n = data.count ?? data.total ?? (Array.isArray(data.findings) ? data.findings.length : undefined);
+  logActivity(`${key} done` + (n !== undefined ? ` - ${n} result(s)` : ''), 'a-ok');
+  if (Array.isArray(data.cves)) {
+    // worst CVEs first (the backend sorts them), coloured like the result lists
+    data.cves.filter(l => /^CVE-/i.test(l)).slice(0, 3)
+      .forEach(l => logActivity(l.split('\t').slice(0, 3).join('  '), severityClass(l) || 'a-info'));
+  }
+  if (Array.isArray(data.findings) && data.findings.length) {
+    logActivity(`${key}: ${data.findings.length} finding(s)`, 'sev-danger');
+  }
+}
+
+function markRunning() {
+  const busy = runningKeys.size > 0;
+  document.body.classList.toggle('is-running', busy);
+  const engine = document.getElementById('engine-state');
+  if (engine) engine.textContent = busy ? 'running: ' + [...runningKeys].join(', ') : 'engine online';
+  const stages = new Set([...runningKeys].map(k => STAGE_OF[k] || k));
+  document.querySelectorAll('.pl-node').forEach(n => n.classList.toggle('run', stages.has(n.dataset.key)));
+}
+
+function setTopbar(text) {
+  const el = document.getElementById('topbar-cmd');
+  if (el) el.textContent = text;
+}
+
 // UI collapse/expand state - kept in memory so it survives re-renders
 // (e.g. after running a tool) instead of resetting every time.
 let uiState = {
@@ -92,7 +140,7 @@ function renderSidebar() {
     const el = document.createElement('div');
     el.className = 'target-item' + (t.id === activeId ? ' active' : '');
     const badge = t.xss_findings > 0 ? `<span class="t-badge" title="${t.xss_findings} unescaped XSS finding(s)"></span>` : '';
-    el.innerHTML = `${badge}<span class="t-name">${t.name}</span><span class="t-remove" data-id="${t.id}">✕</span>`;
+    el.innerHTML = `${badge}<span class="t-name">${escapeHtml(t.name)}</span><span class="t-remove" data-id="${t.id}">✕</span>`;
     el.addEventListener('click', (e) => {
       if (e.target.classList.contains('t-remove')) return;
       activeId = t.id;
@@ -257,13 +305,17 @@ async function runTool({ key, endpoint, method, resultKey, t, onDone }) {
   const statusEl = document.getElementById(`status-${key}`);
   const btn = document.getElementById(`run-${key}`);
   btn.disabled = true;
-  statusEl.className = 'tool-status';
+  statusEl.className = 'tool-status running';
   statusEl.textContent = 'Running... this can take a little while.';
+  runningKeys.add(key);
+  markRunning();
+  logActivity(`${key} started`, 'a-info');
 
   try {
     const res = await fetch(`${API}/${t.id}/${endpoint}`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Unknown error');
+    logResult(key, data);
 
     uiState.sections[VULN_TOOL_KEYS.includes(key) ? 'vuln' : 'recon'] = true;
     uiState.tools[key] = true;
@@ -272,6 +324,10 @@ async function runTool({ key, endpoint, method, resultKey, t, onDone }) {
     statusEl.className = 'tool-status err';
     statusEl.textContent = 'Error: ' + err.message;
     btn.disabled = false;
+    logActivity(`${key} failed: ${err.message}`, 'a-err');
+  } finally {
+    runningKeys.delete(key);
+    markRunning();
   }
 }
 
@@ -285,12 +341,24 @@ async function runAll(t, order = RUN_ALL_ORDER, btnId = 'run-all-btn', statusId 
   for (let i = 0; i < order.length; i++) {
     const step = order[i];
     statusEl.textContent = `Running ${step.key}... (${i + 1}/${order.length})`;
+    runningKeys.add(step.key);
+    markRunning();
+    logActivity(`${step.key} started (${i + 1}/${order.length})`, 'a-info');
     try {
       const res = await fetch(`${API}/${t.id}/${step.endpoint}`, { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) failures.push(`${step.key}: ${data.error || 'error'}`);
+      if (!res.ok) {
+        failures.push(`${step.key}: ${data.error || 'error'}`);
+        logActivity(`${step.key} failed: ${data.error || 'error'}`, 'a-err');
+      } else {
+        logResult(step.key, data);
+      }
     } catch (err) {
       failures.push(`${step.key}: ${err.message}`);
+      logActivity(`${step.key} failed: ${err.message}`, 'a-err');
+    } finally {
+      runningKeys.delete(step.key);
+      markRunning();
     }
   }
 
@@ -462,6 +530,7 @@ async function renderMain() {
   const container = document.getElementById('main-inner');
   const t = targets.find(x => x.id === activeId);
   if (!t) {
+    setTopbar('select a target');
     container.innerHTML = `
       <div id="empty-state">
         <div class="glyph">&gt;_</div>
@@ -469,6 +538,8 @@ async function renderMain() {
       </div>`;
     return;
   }
+
+  setTopbar('scan ' + t.domain);
 
   const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes, authRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
@@ -828,6 +899,22 @@ async function renderMain() {
     }),
   ].join(''));
 
+  const pipelineStages = [
+    { key: 'subdomains', label: 'SUBDOMAINS', value: subs.length, ran: !!subRes.ran },
+    { key: 'httpxlive', label: 'LIVE HOSTS', value: liveHosts.length, ran: !!httpxLiveRes.ran },
+    { key: 'katana', label: 'CRAWL', value: katanaUrls.length, ran: !!katanaRes.ran },
+    { key: 'cvemerge', label: 'CVE', value: cveMergeRes.count || 0, ran: !!cveMergeRes.ran, danger: true },
+    { key: 'xssprobe', label: 'XSS', value: xssFindings.length, ran: !!xssRes.ran, danger: true },
+  ].map(st => ({ ...st, done: st.ran || st.value > 0 }));
+  const pipelineHTML = `
+    <div class="pipeline">
+      ${pipelineStages.map((st, i) => `${i ? `<div class="pl-line ${pipelineStages[i - 1].done ? 'go' : ''}"></div>` : ''}
+        <div class="pl-node ${st.done ? 'done' : ''} ${st.danger && st.value > 0 ? 'bad' : ''}" data-key="${st.key}">
+          <b>${st.label}</b><span>${st.done ? st.value : 'pending'}</span><i></i>
+        </div>`).join('')}
+    </div>
+  `;
+
   const hasAuth = !!authRes.has_auth;
   const authOpen = uiState.sections.auth;
   const authPanelHTML = `
@@ -870,6 +957,8 @@ async function renderMain() {
 
     ${authPanelHTML}
 
+    ${pipelineHTML}
+
     ${statsBarHTML}
 
     <div class="section">
@@ -902,6 +991,8 @@ async function renderMain() {
       </div>
     </div>
   `;
+
+  markRunning();
 
   document.getElementById('section-recon').addEventListener('click', (e) => {
     if (e.target.id === 'run-all-btn') return;
@@ -1097,4 +1188,9 @@ document.getElementById('theme-toggle-btn').addEventListener('click', () => {
   const next = current === 'light' ? 'dark' : 'light';
   localStorage.setItem('theme', next);
   applyTheme(next);
+});
+
+document.getElementById('act-clear-btn').addEventListener('click', () => {
+  document.getElementById('activity-list').innerHTML =
+    '<div class="act-empty">Nothing running yet. Run a tool to see its output here.</div>';
 });

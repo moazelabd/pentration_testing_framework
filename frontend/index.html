@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Recon Framework</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -30,6 +33,12 @@
   </div>
 
   <div id="app-shell">
+    <div id="topbar">
+      <span><span class="pr">recon@framework</span>:~$ <span id="topbar-cmd">select a target</span><span class="cur"></span></span>
+      <span class="sp"></span>
+      <span id="engine-state" class="live">engine online</span>
+    </div>
+    <div id="app-body">
     <div id="sidebar">
       <div id="sidebar-header">
         <div class="label">RECON FRAMEWORK</div>
@@ -42,6 +51,12 @@
 
     <div id="main">
       <div id="main-inner"></div>
+    </div>
+
+    <aside id="activity">
+      <div class="act-head"><span>LIVE OUTPUT</span><button id="act-clear-btn" class="ghost-btn">clear</button></div>
+      <div id="activity-list"><div class="act-empty">Nothing running yet. Run a tool to see its output here.</div></div>
+    </aside>
     </div>
   </div>
 
