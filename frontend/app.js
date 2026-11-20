@@ -61,6 +61,7 @@ let uiState = {
     dns: false, whois: false, techinfo: false, wayback: false, uro: false,
     urlpatterns: false, xssprobe: false, openredirect: false, sqliprobe: false, lfiprobe: false,
     cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
+    tlschecks: false, webmisconfig: false, nsevuln: false, subtakeover: false,
     katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
     wafdetect: false, waffilter: false
   }
@@ -75,6 +76,7 @@ function resetUiState() {
       dns: false, whois: false, techinfo: false, wayback: false, uro: false,
       urlpatterns: false, xssprobe: false, openredirect: false, sqliprobe: false, lfiprobe: false,
     cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
+    tlschecks: false, webmisconfig: false, nsevuln: false, subtakeover: false,
       katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
       wafdetect: false, waffilter: false
     }
@@ -110,7 +112,7 @@ const RUN_ALL_ORDER = [
 ];
 
 // Tools that belong to the Vulnerability Scan section (everything else is Recon).
-const VULN_TOOL_KEYS = ['cvenvd', 'cvecircl', 'cvemerge', 'urlpatterns', 'jssecrets', 'xssprobe', 'openredirect', 'sqliprobe', 'lfiprobe'];
+const VULN_TOOL_KEYS = ['cvenvd', 'cvecircl', 'cvemerge', 'urlpatterns', 'jssecrets', 'xssprobe', 'openredirect', 'sqliprobe', 'lfiprobe', 'tlschecks', 'webmisconfig', 'nsevuln', 'subtakeover'];
 
 // Run order for the Vulnerability Scan section's "Run All".
 //   CVE lookups (passive, need versions from Recon) -> merge -> URL Pattern Filter ->
@@ -125,6 +127,10 @@ const VULN_RUN_ALL_ORDER = [
   { key: 'openredirect', endpoint: 'openredirect' },
   { key: 'sqliprobe', endpoint: 'sqliprobe' },
   { key: 'lfiprobe', endpoint: 'lfiprobe' },
+  { key: 'tlschecks', endpoint: 'tlschecks' },
+  { key: 'webmisconfig', endpoint: 'webmisconfig' },
+  { key: 'nsevuln', endpoint: 'nsevuln' },
+  { key: 'subtakeover', endpoint: 'subtakeover' },
 ];
 
 async function fetchTargets() {
@@ -407,6 +413,10 @@ function buildReportMarkdown(t, data) {
   md += reportSection('Open Redirect Prober', data.openRedirFindings);
   md += reportSection('SQL Injection Error-Based Prober', data.sqliFindings);
   md += reportSection('LFI / Path Traversal Prober', data.lfiFindings);
+  md += reportSection('TLS / SSL Deep Checks', data.tlsFindings);
+  md += reportSection('Web Misconfiguration Checker', data.webMiscFindings);
+  md += reportSection('Nmap Vuln Scripts', data.nseVulnFindings);
+  md += reportSection('Subdomain Takeover Checker', data.subTakeoverFindings);
   md += reportSection('CVEs - merged (NVD + CIRCL)', data.cveMergedLines);
   md += reportSection('CVE Lookup (NVD)', data.cveNvdLines);
   md += reportSection('CVE Lookup (CIRCL)', data.cveCirclLines);
@@ -545,7 +555,7 @@ async function renderMain() {
 
   setTopbar('scan ' + t.domain);
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes, authRes, openRedirRes, sqliRes, lfiRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes, authRes, openRedirRes, sqliRes, lfiRes, tlsRes, webMiscRes, nseVulnRes, subTakeoverRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -559,6 +569,10 @@ async function renderMain() {
     fetch(`${API}/${t.id}/openredirect`).then(r => r.json()),
     fetch(`${API}/${t.id}/sqliprobe`).then(r => r.json()),
     fetch(`${API}/${t.id}/lfiprobe`).then(r => r.json()),
+    fetch(`${API}/${t.id}/tlschecks`).then(r => r.json()),
+    fetch(`${API}/${t.id}/webmisconfig`).then(r => r.json()),
+    fetch(`${API}/${t.id}/nsevuln`).then(r => r.json()),
+    fetch(`${API}/${t.id}/subtakeover`).then(r => r.json()),
     fetch(`${API}/${t.id}/all_params`).then(r => r.json()),
     fetch(`${API}/${t.id}/httpx_live`).then(r => r.json()),
     fetch(`${API}/${t.id}/httpx_filter`).then(r => r.json()),
@@ -588,6 +602,10 @@ async function renderMain() {
   const openRedirFindings = openRedirRes.findings || [];
   const sqliFindings = sqliRes.findings || [];
   const lfiFindings = lfiRes.findings || [];
+  const tlsFindings = tlsRes.findings || [];
+  const webMiscFindings = webMiscRes.findings || [];
+  const nseVulnFindings = nseVulnRes.findings || [];
+  const subTakeoverFindings = subTakeoverRes.findings || [];
   const paramUrls = paramsRes.urls || [];
   const liveHosts = httpxLiveRes.hosts || [];
   const httpxSplit = httpxFilterRes.summary || [];
@@ -632,6 +650,11 @@ async function renderMain() {
     { label: 'Open redirect findings', value: openRedirFindings.filter(l => l.startsWith('VULNERABLE')).length, danger: true },
     { label: 'SQLi findings', value: sqliFindings.length, danger: true },
     { label: 'LFI findings', value: lfiFindings.length, danger: true },
+    { label: 'TLS issues', value: tlsFindings.filter(l => l.includes('INSECURE') || l.includes('ISSUE')).length, danger: true },
+    { label: 'Missing headers', value: webMiscRes.missing_headers || 0 },
+    { label: 'Dir listings exposed', value: webMiscRes.exposed_directories || 0, danger: true },
+    { label: 'Nmap vuln hits', value: nseVulnFindings.length, danger: true },
+    { label: 'Subdomain takeovers', value: subTakeoverRes.count || 0, danger: true },
     { label: 'CVEs (merged)', value: cveMergeRes.count || 0, danger: true },
   ];
   const statsBarHTML = `
@@ -917,6 +940,47 @@ async function renderMain() {
     }),
   ].join(''));
 
+  const vulnInfraGroup = toolGroupHTML('Infrastructure & Config', [
+    toolCardHTML({
+      key: 'tlschecks',
+      title: 'TLS / SSL Deep Checks',
+      description: 'Forces a handshake on each TLS/SSL protocol version to find which deprecated ones (SSLv3, TLS1.0, TLS1.1) the server still accepts, and separately checks for a self-signed cert, hostname mismatch, expired cert or broken chain. Active - a few TLS handshakes, no HTTP request.',
+      note: `Saved to targets/${t.id}/tls_checks.txt`,
+      statusText: statusFor(tlsRes.ran, tlsFindings.length, 'checks'),
+      updatedAt: tlsRes.updated_at,
+      items: tlsFindings
+    }),
+    toolCardHTML({
+      key: 'webmisconfig',
+      title: 'Web Misconfiguration Checker',
+      description: 'Checks for missing security headers (CSP, HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy) and probes a handful of common directories for an exposed directory listing. Active - a handful of HTTP requests.',
+      note: `Saved to targets/${t.id}/web_misconfig.txt`,
+      statusText: statusFor(webMiscRes.ran, webMiscFindings.length, 'checks'),
+      updatedAt: webMiscRes.updated_at,
+      items: webMiscFindings
+    }),
+    toolCardHTML({
+      key: 'nsevuln',
+      title: 'Nmap Vuln Scripts (nmap --script vuln)',
+      description: 'Re-scans just the open ports Port Scan found with nmap\'s "vuln" NSE script category - checks for known CVEs and misconfigurations specific to whatever service is listening. Active, more intensive than the plain port scan - requires nmap and run Port Scan first.',
+      note: `Saved to targets/${t.id}/nse_vuln.txt · requires nmap installed on this machine`,
+      statusText: statusFor(nseVulnRes.ran, nseVulnFindings.length, 'findings'),
+      updatedAt: nseVulnRes.updated_at,
+      items: nseVulnFindings,
+      disabledReason: !ports.length ? 'Run "Port Scan" first' : null
+    }),
+    toolCardHTML({
+      key: 'subtakeover',
+      title: 'Subdomain Takeover Checker',
+      description: 'Resolves each subdomain\'s CNAME and, if it points at a known cloud service (S3, GitHub Pages, Heroku, Netlify...), checks the service\'s own "not claimed" fingerprint text - flags subdomains an attacker could potentially take over. Mostly passive DNS + one request per match - run Subdomain Enumeration first.',
+      note: `Saved to targets/${t.id}/subdomain_takeover.txt`,
+      statusText: statusFor(subTakeoverRes.ran, subTakeoverFindings.length, 'checked'),
+      updatedAt: subTakeoverRes.updated_at,
+      items: subTakeoverFindings,
+      disabledReason: !subRes.ran ? 'Run "Subdomain Enumeration" first' : null
+    }),
+  ].join(''));
+
   const pipelineStages = [
     { key: 'subdomains', label: 'SUBDOMAINS', value: subs.length, ran: !!subRes.ran },
     { key: 'httpxlive', label: 'LIVE HOSTS', value: liveHosts.length, ran: !!httpxLiveRes.ran },
@@ -1006,6 +1070,7 @@ async function renderMain() {
         ${vulnCveGroup}
         ${vulnTriageGroup}
         ${vulnActiveGroup}
+        ${vulnInfraGroup}
       </div>
     </div>
   `;
@@ -1077,6 +1142,7 @@ async function renderMain() {
       ports, dnsRecords, whoisLines, endpoints,
       waybackUrls, uroUrls, urlPatterns, paramUrls,
       techLines, xssFindings, openRedirFindings, sqliFindings, lfiFindings,
+      tlsFindings, webMiscFindings, nseVulnFindings, subTakeoverFindings,
       cveNvdLines, cveCirclLines, cveMergedLines
     });
   });
@@ -1104,6 +1170,10 @@ async function renderMain() {
   wireToolCard('openredirect', openRedirFindings, () => runTool({ key: 'openredirect', endpoint: 'openredirect', t }));
   wireToolCard('sqliprobe', sqliFindings, () => runTool({ key: 'sqliprobe', endpoint: 'sqliprobe', t }));
   wireToolCard('lfiprobe', lfiFindings, () => runTool({ key: 'lfiprobe', endpoint: 'lfiprobe', t }));
+  wireToolCard('tlschecks', tlsFindings, () => runTool({ key: 'tlschecks', endpoint: 'tlschecks', t }));
+  wireToolCard('webmisconfig', webMiscFindings, () => runTool({ key: 'webmisconfig', endpoint: 'webmisconfig', t }));
+  wireToolCard('nsevuln', nseVulnFindings, () => runTool({ key: 'nsevuln', endpoint: 'nsevuln', t }));
+  wireToolCard('subtakeover', subTakeoverFindings, () => runTool({ key: 'subtakeover', endpoint: 'subtakeover', t }));
   wireToolCard('cvenvd', cveNvdLines, () => runTool({ key: 'cvenvd', endpoint: 'cve_nvd', t }));
   wireToolCard('cvecircl', cveCirclLines, () => runTool({ key: 'cvecircl', endpoint: 'cve_circl', t }));
   wireToolCard('cvemerge', cveMergedLines, () => runTool({ key: 'cvemerge', endpoint: 'cve_merge', t }));

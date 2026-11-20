@@ -30,8 +30,9 @@ from modules.recon import (
 )
 from modules import auth_ctx
 from modules.vuln_scan import (
-    cve_circl, cve_merge, cve_nvd, jsluice_secrets, lfi_prober, open_redirect_prober,
-    sqli_prober, url_pattern_filter, xss_prober,
+    cve_circl, cve_merge, cve_nvd, jsluice_secrets, lfi_prober, nse_vuln_scripts,
+    open_redirect_prober, sqli_prober, subdomain_takeover, tls_checks,
+    url_pattern_filter, web_misconfig, xss_prober,
 )
 
 app = Flask(__name__, static_folder=storage.FRONTEND_DIR, static_url_path="")
@@ -411,6 +412,90 @@ def run_lfiprobe_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(lfi_prober.run(domain, target_path))
+
+
+# ---------- vuln scan: TLS / SSL deep checks ----------
+
+@app.route("/api/targets/<target_id>/tlschecks", methods=["GET"])
+def get_tlschecks(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = tls_checks.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "tls_checks.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/tlschecks", methods=["POST"])
+def run_tlschecks_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(tls_checks.run(domain, target_path))
+
+
+# ---------- vuln scan: web misconfiguration (headers + dir listing) ----------
+
+@app.route("/api/targets/<target_id>/webmisconfig", methods=["GET"])
+def get_webmisconfig(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = web_misconfig.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "web_misconfig.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/webmisconfig", methods=["POST"])
+def run_webmisconfig_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(web_misconfig.run(domain, target_path))
+
+
+# ---------- vuln scan: nmap vuln NSE scripts ----------
+
+@app.route("/api/targets/<target_id>/nsevuln", methods=["GET"])
+def get_nsevuln(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = nse_vuln_scripts.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "nse_vuln.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/nsevuln", methods=["POST"])
+def run_nsevuln_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(nse_vuln_scripts.run(domain, target_path))
+
+
+# ---------- vuln scan: subdomain takeover checker ----------
+
+@app.route("/api/targets/<target_id>/subtakeover", methods=["GET"])
+def get_subtakeover(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = subdomain_takeover.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "subdomain_takeover.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/subtakeover", methods=["POST"])
+def run_subtakeover_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(subdomain_takeover.run(domain, target_path))
 
 
 # ---------- vuln scan: CVE lookup via NVD ----------
