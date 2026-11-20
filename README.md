@@ -1,8 +1,8 @@
 # Penetration Testing Framework
 
-An internal tool for the **recon** phase of authorized penetration tests /
-in-scope bug bounty work. Each target gets a folder on disk with one text
-file per tool's results.
+An internal tool covering the full **recon + vulnerability scanning** phases of
+authorized penetration tests / in-scope bug bounty work. Each target gets a
+folder on disk with one text file per tool's results.
 
 ⚠️ **Only use this on targets you have explicit, documented authorization to test.**
 
@@ -15,8 +15,9 @@ capstone_prj/
 │   ├── storage.py           # target folders / meta.json helpers
 │   ├── requirements.txt
 │   ├── modules/
+│   │   ├── auth_ctx.py       # optional login session, scoped to the target's own domain
 │   │   ├── recon/           # one file per recon tool
-│   │   └── vuln_scan/       # CVE lookup (NVD + CIRCL + merge), URL pattern filter, JS secrets, XSS prober (+ planned modules)
+│   │   └── vuln_scan/       # CVE lookup (NVD + CIRCL + merge), triage/secrets, active probers (XSS/open redirect/SQLi/LFI), TLS/web-misconfig/nmap-vuln/subdomain-takeover checks
 │   └── targets/              # one folder per target, created automatically
 └── frontend/
     ├── index.html
@@ -59,7 +60,8 @@ Wayback Machine URLs -> URL Cleaner (uro)   -> URL Pattern Filter -> XSS Reflect
 automatically, skipping past any tool that fails.
 
 The **Vulnerability Scan** section has its own **Run All** (CVE NVD -> CVE CIRCL -> CVE Merge -> URL Pattern Filter ->
-JS Secrets -> XSS Prober). It relies on Recon results, so run Recon first.
+JS Secrets -> XSS Prober -> Open Redirect Prober -> SQLi Prober -> LFI Prober -> TLS Checks -> Web Misconfiguration
+Checker -> Nmap Vuln Scripts -> Subdomain Takeover Checker). It relies on Recon results, so run Recon first.
 
 The target page has two collapsible sections.
 
@@ -68,7 +70,9 @@ The target page has two collapsible sections.
 Endpoints, Wayback, uro, urldedupe, Parameter Collector) and **Fingerprinting** (Tech Fingerprint + TLS).
 
 **Vulnerability Scan** - **CVE Lookup** (NVD, CIRCL, Merge), **Triage & Secrets** (URL Pattern Filter, JS Secrets via
-jsluice) and **Active Testing** (XSS Reflection Prober).
+jsluice), **Active Testing** (XSS Reflection Prober, Open Redirect Prober, SQL Injection Error-Based Prober,
+LFI / Path Traversal Prober) and **Infrastructure & Config** (TLS / SSL Deep Checks, Web Misconfiguration Checker,
+Nmap Vuln Scripts, Subdomain Takeover Checker).
 
 ## Scanning behind a login (optional)
 
@@ -132,14 +136,20 @@ the rest of the pipeline keeps working.
 | CVE Lookup (NVD) | passive | Looks up the product + version pairs found by Tech Fingerprint / Live Host Probe (e.g. nginx 1.18.0) in NIST NVD. Nothing is sent to the target. ~6.5s per request without a key - set `NVD_API_KEY` to speed up |
 | CVE Lookup (CIRCL) | passive | Same input, second independent source (CIRCL Vulnerability-Lookup): fetches the product's CVEs and keeps those whose affected-version ranges include the detected version |
 | CVE Merge | passive | Combines NVD + CIRCL results: one line per CVE (duplicates removed, sources combined, highest CVSS kept), sorted by severity |
+| Open Redirect Prober | active | Injects `https://evil-redirect-poc.example/` (and encoded variants) into URLs tagged `redirect`, flags any `Location` header that follows it (no actual redirect used) |
+| SQL Injection Error-Based Prober | active | Injects `'`, `"`, `' OR '1'='1` etc. into URLs tagged `sqli`, flags responses matching known MySQL/MSSQL/PostgreSQL/Oracle/SQLite error signatures |
+| LFI / Path Traversal Prober | active | Injects path-traversal payloads (several encodings/bypasses) into URLs tagged `lfi`, flags `/etc/passwd` or `win.ini` content in the response |
+| TLS / SSL Deep Checks | active | Forces a handshake on each deprecated protocol (SSLv3/TLSv1/TLSv1.1) to flag if it's still accepted, plus classifies certificate verification failures (self-signed, hostname mismatch, expired, incomplete chain) |
+| Web Misconfiguration Checker | active | Checks for 5 missing security headers (CSP, HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy) and probes common paths for exposed directory listings |
+| Nmap Vuln Scripts | active | Re-scans the open ports found by Port Scan with nmap's `--script vuln` category (CVE/misconfiguration checks specific to the listening service) |
+| Subdomain Takeover Checker | passive + 1 request | Resolves each subdomain's CNAME, and if it points at a known third-party service (S3, GitHub Pages, Heroku, Azure, Netlify, etc.) checks the response against that service's own "unclaimed resource" fingerprint |
 
 Results save to `backend/targets/<target-id>/*.txt`, one file per tool.
 
-## What's next (not built yet)
+## What's next
 
-`backend/modules/vuln_scan/` already holds `url_pattern_filter.py`, `jsluice_secrets.py` and
-`xss_prober.py`, plus `cve_nvd.py`, `cve_circl.py`, `cve_merge.py` (shared helpers in `cve_common.py`).
-Still planned: `nse_vuln_scripts.py`, `tls_checks.py`, `web_misconfig.py`. The **Monitoring** button is also just a placeholder for now.
+The **Monitoring** button is still just a placeholder for now. Recon and Vulnerability Scan are both
+fully built out.
 
 ## Adding a new tool
 
@@ -182,6 +192,13 @@ Still planned: `nse_vuln_scripts.py`, `tls_checks.py`, `web_misconfig.py`. The *
 | GET/POST | `/api/targets/<id>/all_params` | Parameter Collector |
 | GET/POST | `/api/targets/<id>/urlpatterns` | URL Pattern Filter |
 | GET/POST | `/api/targets/<id>/xssprobe` | XSS Reflection Prober |
+| GET/POST | `/api/targets/<id>/openredirect` | Open Redirect Prober |
+| GET/POST | `/api/targets/<id>/sqliprobe` | SQL Injection Error-Based Prober |
+| GET/POST | `/api/targets/<id>/lfiprobe` | LFI / Path Traversal Prober |
+| GET/POST | `/api/targets/<id>/tlschecks` | TLS / SSL Deep Checks |
+| GET/POST | `/api/targets/<id>/webmisconfig` | Web Misconfiguration Checker |
+| GET/POST | `/api/targets/<id>/nsevuln` | Nmap Vuln Scripts |
+| GET/POST | `/api/targets/<id>/subtakeover` | Subdomain Takeover Checker |
 
 GET returns the last saved result (`{"ran": false}` if never run). POST
 runs the tool fresh and overwrites the saved result.
