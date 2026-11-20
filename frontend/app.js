@@ -59,7 +59,8 @@ let uiState = {
     subdomains: false, httpxlive: false, httpxfilter: false,
     portscan: false, endpoints: false,
     dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-    urlpatterns: false, xssprobe: false, cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
+    urlpatterns: false, xssprobe: false, openredirect: false, sqliprobe: false, lfiprobe: false,
+    cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
     katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
     wafdetect: false, waffilter: false
   }
@@ -72,7 +73,8 @@ function resetUiState() {
       subdomains: false, httpxlive: false, httpxfilter: false,
       portscan: false, endpoints: false,
       dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-      urlpatterns: false, xssprobe: false, cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
+      urlpatterns: false, xssprobe: false, openredirect: false, sqliprobe: false, lfiprobe: false,
+    cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
       katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
       wafdetect: false, waffilter: false
     }
@@ -108,7 +110,7 @@ const RUN_ALL_ORDER = [
 ];
 
 // Tools that belong to the Vulnerability Scan section (everything else is Recon).
-const VULN_TOOL_KEYS = ['cvenvd', 'cvecircl', 'cvemerge', 'urlpatterns', 'jssecrets', 'xssprobe'];
+const VULN_TOOL_KEYS = ['cvenvd', 'cvecircl', 'cvemerge', 'urlpatterns', 'jssecrets', 'xssprobe', 'openredirect', 'sqliprobe', 'lfiprobe'];
 
 // Run order for the Vulnerability Scan section's "Run All".
 //   CVE lookups (passive, need versions from Recon) -> merge -> URL Pattern Filter ->
@@ -120,6 +122,9 @@ const VULN_RUN_ALL_ORDER = [
   { key: 'urlpatterns', endpoint: 'urlpatterns' },
   { key: 'jssecrets', endpoint: 'jsluice_secrets' },
   { key: 'xssprobe', endpoint: 'xssprobe' },
+  { key: 'openredirect', endpoint: 'openredirect' },
+  { key: 'sqliprobe', endpoint: 'sqliprobe' },
+  { key: 'lfiprobe', endpoint: 'lfiprobe' },
 ];
 
 async function fetchTargets() {
@@ -399,6 +404,9 @@ function buildReportMarkdown(t, data) {
   md += reportSection('Parameter Collector (all_params)', data.paramUrls);
   md += reportSection('Tech Fingerprint + TLS', data.techLines);
   md += reportSection('XSS Reflection Prober (dalfox-inspired)', data.xssFindings);
+  md += reportSection('Open Redirect Prober', data.openRedirFindings);
+  md += reportSection('SQL Injection Error-Based Prober', data.sqliFindings);
+  md += reportSection('LFI / Path Traversal Prober', data.lfiFindings);
   md += reportSection('CVEs - merged (NVD + CIRCL)', data.cveMergedLines);
   md += reportSection('CVE Lookup (NVD)', data.cveNvdLines);
   md += reportSection('CVE Lookup (CIRCL)', data.cveCirclLines);
@@ -537,7 +545,7 @@ async function renderMain() {
 
   setTopbar('scan ' + t.domain);
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes, authRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes, authRes, openRedirRes, sqliRes, lfiRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -548,6 +556,9 @@ async function renderMain() {
     fetch(`${API}/${t.id}/uro`).then(r => r.json()),
     fetch(`${API}/${t.id}/urlpatterns`).then(r => r.json()),
     fetch(`${API}/${t.id}/xssprobe`).then(r => r.json()),
+    fetch(`${API}/${t.id}/openredirect`).then(r => r.json()),
+    fetch(`${API}/${t.id}/sqliprobe`).then(r => r.json()),
+    fetch(`${API}/${t.id}/lfiprobe`).then(r => r.json()),
     fetch(`${API}/${t.id}/all_params`).then(r => r.json()),
     fetch(`${API}/${t.id}/httpx_live`).then(r => r.json()),
     fetch(`${API}/${t.id}/httpx_filter`).then(r => r.json()),
@@ -574,6 +585,9 @@ async function renderMain() {
   const uroUrls = uroRes.urls || [];
   const urlPatterns = urlPatRes.matches || [];
   const xssFindings = xssRes.findings || [];
+  const openRedirFindings = openRedirRes.findings || [];
+  const sqliFindings = sqliRes.findings || [];
+  const lfiFindings = lfiRes.findings || [];
   const paramUrls = paramsRes.urls || [];
   const liveHosts = httpxLiveRes.hosts || [];
   const httpxSplit = httpxFilterRes.summary || [];
@@ -615,6 +629,9 @@ async function renderMain() {
     { label: 'Pattern matches', value: urlPatterns.length },
     { label: 'Param URLs', value: paramUrls.length },
     { label: 'XSS findings', value: xssFindings.length, danger: true },
+    { label: 'Open redirect findings', value: openRedirFindings.filter(l => l.startsWith('VULNERABLE')).length, danger: true },
+    { label: 'SQLi findings', value: sqliFindings.length, danger: true },
+    { label: 'LFI findings', value: lfiFindings.length, danger: true },
     { label: 'CVEs (merged)', value: cveMergeRes.count || 0, danger: true },
   ];
   const statsBarHTML = `
@@ -868,6 +885,36 @@ async function renderMain() {
       items: xssFindings,
       disabledReason: !urlPatRes.ran ? 'Run "URL Pattern Filter" first' : null
     }),
+    toolCardHTML({
+      key: 'openredirect',
+      title: 'Open Redirect Prober',
+      description: 'Replaces each param of the "redirect"-tagged URLs with an external marker domain and checks (without following) whether the Location header sends browsers straight there - a signal of an unvalidated redirect destination. Active - run URL Pattern Filter first.',
+      note: `Saved to targets/${t.id}/open_redirect_probe.txt`,
+      statusText: statusFor(openRedirRes.ran, openRedirFindings.length, 'findings'),
+      updatedAt: openRedirRes.updated_at,
+      items: openRedirFindings,
+      disabledReason: !urlPatRes.ran ? 'Run "URL Pattern Filter" first' : null
+    }),
+    toolCardHTML({
+      key: 'sqliprobe',
+      title: 'SQL Injection Error-Based Prober',
+      description: 'Appends syntax-breaking payloads to each param of the "sqli"-tagged URLs and checks the response for known MySQL/PostgreSQL/MSSQL/Oracle/SQLite error signatures - a signal, not proof, of SQL injection. Active - run URL Pattern Filter first.',
+      note: `Saved to targets/${t.id}/sqli_probe.txt`,
+      statusText: statusFor(sqliRes.ran, sqliFindings.length, 'findings'),
+      updatedAt: sqliRes.updated_at,
+      items: sqliFindings,
+      disabledReason: !urlPatRes.ran ? 'Run "URL Pattern Filter" first' : null
+    }),
+    toolCardHTML({
+      key: 'lfiprobe',
+      title: 'LFI / Path Traversal Prober',
+      description: 'Tries path-traversal payloads (/etc/passwd, win.ini) on each param of the "lfi"-tagged URLs and checks the response for that file\'s own content - a strong signal of local file inclusion. Active - run URL Pattern Filter first.',
+      note: `Saved to targets/${t.id}/lfi_probe.txt`,
+      statusText: statusFor(lfiRes.ran, lfiFindings.length, 'findings'),
+      updatedAt: lfiRes.updated_at,
+      items: lfiFindings,
+      disabledReason: !urlPatRes.ran ? 'Run "URL Pattern Filter" first' : null
+    }),
   ].join(''));
 
   const pipelineStages = [
@@ -1029,7 +1076,7 @@ async function renderMain() {
       jsUrlsFound, jsSecretFindings, jsParamUrls,
       ports, dnsRecords, whoisLines, endpoints,
       waybackUrls, uroUrls, urlPatterns, paramUrls,
-      techLines, xssFindings,
+      techLines, xssFindings, openRedirFindings, sqliFindings, lfiFindings,
       cveNvdLines, cveCirclLines, cveMergedLines
     });
   });
@@ -1054,6 +1101,9 @@ async function renderMain() {
   wireToolCard('urlpatterns', urlPatterns, () => runTool({ key: 'urlpatterns', endpoint: 'urlpatterns', t }));
   wireToolCard('allparams', paramUrls, () => runTool({ key: 'allparams', endpoint: 'all_params', t }));
   wireToolCard('xssprobe', xssFindings, () => runTool({ key: 'xssprobe', endpoint: 'xssprobe', t }));
+  wireToolCard('openredirect', openRedirFindings, () => runTool({ key: 'openredirect', endpoint: 'openredirect', t }));
+  wireToolCard('sqliprobe', sqliFindings, () => runTool({ key: 'sqliprobe', endpoint: 'sqliprobe', t }));
+  wireToolCard('lfiprobe', lfiFindings, () => runTool({ key: 'lfiprobe', endpoint: 'lfiprobe', t }));
   wireToolCard('cvenvd', cveNvdLines, () => runTool({ key: 'cvenvd', endpoint: 'cve_nvd', t }));
   wireToolCard('cvecircl', cveCirclLines, () => runTool({ key: 'cvecircl', endpoint: 'cve_circl', t }));
   wireToolCard('cvemerge', cveMergedLines, () => runTool({ key: 'cvemerge', endpoint: 'cve_merge', t }));

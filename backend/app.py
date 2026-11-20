@@ -30,7 +30,8 @@ from modules.recon import (
 )
 from modules import auth_ctx
 from modules.vuln_scan import (
-    cve_circl, cve_merge, cve_nvd, jsluice_secrets, url_pattern_filter, xss_prober,
+    cve_circl, cve_merge, cve_nvd, jsluice_secrets, lfi_prober, open_redirect_prober,
+    sqli_prober, url_pattern_filter, xss_prober,
 )
 
 app = Flask(__name__, static_folder=storage.FRONTEND_DIR, static_url_path="")
@@ -347,6 +348,69 @@ def run_xssprobe_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(xss_prober.run(domain, target_path))
+
+
+# ---------- vuln scan: open redirect prober ----------
+
+@app.route("/api/targets/<target_id>/openredirect", methods=["GET"])
+def get_openredirect(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = open_redirect_prober.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "open_redirect_probe.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/openredirect", methods=["POST"])
+def run_openredirect_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(open_redirect_prober.run(domain, target_path))
+
+
+# ---------- vuln scan: SQL injection error-based prober ----------
+
+@app.route("/api/targets/<target_id>/sqliprobe", methods=["GET"])
+def get_sqliprobe(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = sqli_prober.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "sqli_probe.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/sqliprobe", methods=["POST"])
+def run_sqliprobe_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(sqli_prober.run(domain, target_path))
+
+
+# ---------- vuln scan: LFI / path traversal prober ----------
+
+@app.route("/api/targets/<target_id>/lfiprobe", methods=["GET"])
+def get_lfiprobe(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    result = lfi_prober.get_cached(target_path)
+    result["updated_at"] = storage.updated_at(target_path, "lfi_probe.txt")
+    return jsonify(result)
+
+
+@app.route("/api/targets/<target_id>/lfiprobe", methods=["POST"])
+def run_lfiprobe_route(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    domain = storage.read_meta(target_path)["domain"]
+    return module_result(lfi_prober.run(domain, target_path))
 
 
 # ---------- vuln scan: CVE lookup via NVD ----------
