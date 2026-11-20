@@ -2,9 +2,8 @@
 Live Host Discovery via httpx - ACTIVE (sends HTTP requests to the target's
 subdomains - only run against in-scope, authorized targets).
 
-Takes the subdomains collected by the enumeration modules (subfinder.txt
-preferred, falling back to the all-in-one subdomains.txt) and probes each
-one with the industry-standard `httpx` CLI (github.com/projectdiscovery/
+Takes the subdomains collected by Subdomain Enumeration (subdomains.txt)
+and probes each one with the industry-standard `httpx` CLI (github.com/projectdiscovery/
 httpx) to find which hosts actually respond.
 
 Deliberately keeps non-200 answers: -mc 200,301,302,401,403,404 means
@@ -85,15 +84,12 @@ def _find_real_httpx():
 
 
 def _read_input_hosts(target_path: str):
-    """Read candidate subdomains for probing. Prefers subfinder.txt
-    (module 11: plain one-per-line hosts), falls back to subdomains.txt
-    (module 1: hosts tagged with sources - strip the tags, httpx must
-    only ever see bare hostnames)."""
-    for filename, label in [("subfinder.txt", "subfinder.txt"),
-                            ("subdomains.txt", "subdomains.txt")]:
-        path = os.path.join(target_path, filename)
-        if os.path.isfile(path):
-            return path, label, _clean_hosts(path)
+    """Read candidate subdomains for probing from subdomains.txt (hosts
+    tagged with sources - strip the tags, httpx must only ever see bare
+    hostnames)."""
+    path = os.path.join(target_path, "subdomains.txt")
+    if os.path.isfile(path):
+        return path, "subdomains.txt", _clean_hosts(path)
     return None, None, []
 
 
@@ -126,9 +122,8 @@ def run(domain: str, target_path: str) -> dict:
     input_path, source_label, hosts = _read_input_hosts(target_path)
     if input_path is None:
         return {
-            "error": "No subfinder.txt (or subdomains.txt) found for this target - "
-                     "run Subfinder or Subdomain Enumeration first; this module "
-                     "probes their results for live hosts.",
+            "error": "No subdomains.txt found for this target - run Subdomain "
+                     "Enumeration first; this module probes its results for live hosts.",
             "status": 400,
         }
     if not hosts:

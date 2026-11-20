@@ -4,11 +4,9 @@ Parameter Collector - PASSIVE, zero network calls.
 Consolidates every parameterized URL found across the pipeline so the
 active-testing phase has one place to pull its worklist from:
 
-  1. subfinder.txt   - subdomains from the Subfinder module
-  2. urldedupe.txt   - cleaned URLs from the urldedupe module
-                       (falls back to uro_urls.txt / wayback.txt when
-                       urldedupe hasn't been run, like the other
-                       analysis modules do)
+  1. subdomains.txt  - subdomains from Subdomain Enumeration (all-in-one)
+  2. uro_urls.txt     - cleaned URLs from the URL Cleaner module (falls
+                       back to wayback.txt when uro hasn't been run yet)
 
 Combined, filtered to lines containing '?' (i.e. URLs that actually
 carry query parameters - `?id=1`, `?page=2`, ...), deduplicated, and
@@ -16,7 +14,7 @@ saved to all_params.txt.
 
 Ready for the next phase: feed all_params.txt into the XSS Prober or
 future vuln_scan modules instead of re-merging the per-tool outputs
-every time. Run Subfinder and Wayback (+ urldedupe) first.
+every time. Run Subdomain Enumeration and Wayback (+ URL Cleaner) first.
 """
 import os
 
@@ -41,14 +39,13 @@ def _read_lines(path: str) -> list:
 
 
 def run(domain: str, target_path: str) -> dict:
-    subfinder_path = os.path.join(target_path, "subfinder.txt")
+    subdomains_path = os.path.join(target_path, "subdomains.txt")
 
-    # Parameterized URLs: urldedupe first, then the older cleaners as
-    # fallbacks so this module still works before urldedupe is installed.
+    # Parameterized URLs: uro's cleaned output first, falling back to
+    # raw wayback.txt if uro hasn't been run yet.
     url_source = None
     source_label = None
     for filename, label in [
-        ("urldedupe.txt", "urldedupe.txt"),
         ("uro_urls.txt", "uro_urls.txt"),
         ("wayback.txt", "wayback.txt"),
     ]:
@@ -59,19 +56,19 @@ def run(domain: str, target_path: str) -> dict:
             break
 
     missing = []
-    if not os.path.isfile(subfinder_path):
-        missing.append("subfinder")
+    if not os.path.isfile(subdomains_path):
+        missing.append("Subdomain Enumeration")
     if url_source is None:
-        missing.append("wayback (or urldedupe/uro)")
+        missing.append("Wayback Machine (or URL Cleaner)")
     if missing:
         return {
             "error": "Input results missing for this target - run "
-                     f"{', '.join(missing)} first. Checked for subfinder.txt and "
-                     "a cleaned URL file (urldedupe.txt / uro_urls.txt / wayback.txt).",
+                     f"{', '.join(missing)} first. Checked for subdomains.txt and "
+                     "a cleaned URL file (uro_urls.txt / wayback.txt).",
             "status": 400,
         }
 
-    subdomains = _read_lines(subfinder_path)
+    subdomains = _read_lines(subdomains_path)
     urls = _read_lines(url_source)
 
     combined = list(dict.fromkeys(subdomains + urls))  # order-preserving dedupe

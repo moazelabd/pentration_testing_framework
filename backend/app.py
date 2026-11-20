@@ -24,8 +24,8 @@ from modules.recon import (
     httpx_filter, httpx_live,
     js_param_collector, js_extractor, jsluice_urls,
     katana_crawl, param_collector, portscan,
-    subfinder_enum, subdomains_all_in_one as subdomains,
-    tech_fingerprint, urldedupe_filter,
+    subdomains_all_in_one as subdomains,
+    tech_fingerprint,
     uro_filter, waf_detect, waf_filter, wayback_urls, whois_lookup,
 )
 from modules import auth_ctx
@@ -410,48 +410,6 @@ def run_cve_merge_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(cve_merge.run(domain, target_path))
-
-
-# ---------- recon: subfinder (industry-standard subdomain enum) ----------
-
-@app.route("/api/targets/<target_id>/subfinder", methods=["GET"])
-def get_subfinder(target_id):
-    target_path = resolve_target(target_id)
-    if not target_path:
-        return jsonify({"error": "not found"}), 404
-    result = subfinder_enum.get_cached(target_path)
-    result["updated_at"] = storage.updated_at(target_path, "subfinder.txt")
-    return jsonify(result)
-
-
-@app.route("/api/targets/<target_id>/subfinder", methods=["POST"])
-def run_subfinder_route(target_id):
-    target_path = resolve_target(target_id)
-    if not target_path:
-        return jsonify({"error": "not found"}), 404
-    domain = storage.read_meta(target_path)["domain"]
-    return module_result(subfinder_enum.run(domain, target_path))
-
-
-# ---------- recon: urldedupe (industry-standard URL dedupe) ----------
-
-@app.route("/api/targets/<target_id>/urldedupe", methods=["GET"])
-def get_urldedupe(target_id):
-    target_path = resolve_target(target_id)
-    if not target_path:
-        return jsonify({"error": "not found"}), 404
-    result = urldedupe_filter.get_cached(target_path)
-    result["updated_at"] = storage.updated_at(target_path, "urldedupe.txt")
-    return jsonify(result)
-
-
-@app.route("/api/targets/<target_id>/urldedupe", methods=["POST"])
-def run_urldedupe_route(target_id):
-    target_path = resolve_target(target_id)
-    if not target_path:
-        return jsonify({"error": "not found"}), 404
-    domain = storage.read_meta(target_path)["domain"]
-    return module_result(urldedupe_filter.run(domain, target_path))
 
 
 # ---------- recon: parameter collection (feeds active testing) ----------

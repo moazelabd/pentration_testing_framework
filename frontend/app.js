@@ -7,7 +7,7 @@ let activeId = null;
 const runningKeys = new Set();
 const ACTIVITY_MAX = 200;
 // tools that light up a pipeline stage other than their own card
-const STAGE_OF = { subfinder: 'subdomains', httpxfilter: 'httpxlive', cvenvd: 'cvemerge', cvecircl: 'cvemerge' };
+const STAGE_OF = { httpxfilter: 'httpxlive', cvenvd: 'cvemerge', cvecircl: 'cvemerge' };
 
 function logActivity(text, cls = 'a-info') {
   const list = document.getElementById('activity-list');
@@ -56,10 +56,10 @@ function setTopbar(text) {
 let uiState = {
   sections: { recon: false, vuln: false, auth: false },
   tools: {
-    subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
+    subdomains: false, httpxlive: false, httpxfilter: false,
     portscan: false, endpoints: false,
     dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-    urldedupe: false, urlpatterns: false, xssprobe: false, cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
+    urlpatterns: false, xssprobe: false, cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
     katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
     wafdetect: false, waffilter: false
   }
@@ -69,10 +69,10 @@ function resetUiState() {
   uiState = {
     sections: { recon: false, vuln: false, auth: false },
     tools: {
-      subdomains: false, subfinder: false, httpxlive: false, httpxfilter: false,
+      subdomains: false, httpxlive: false, httpxfilter: false,
       portscan: false, endpoints: false,
       dns: false, whois: false, techinfo: false, wayback: false, uro: false,
-      urldedupe: false, urlpatterns: false, xssprobe: false, cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
+      urlpatterns: false, xssprobe: false, cvenvd: false, cvecircl: false, cvemerge: false, allparams: false,
       katana: false, jsextract: false, jsurls: false, jssecrets: false, jsparams: false,
       wafdetect: false, waffilter: false
     }
@@ -80,16 +80,15 @@ function resetUiState() {
 }
 
 // Dependency-safe order for "Run All" (Recon):
-//   1) passive intel      : subdomains, subfinder, dns, whois, wayback
+//   1) passive intel      : subdomains, dns, whois, wayback
 //   2) live hosts         : httpx probe -> status split
 //   3) fingerprint        : wafw00f -> waf filter, tech fingerprint, port scan
 //   4) crawl + JS         : katana -> JS extractor -> jsluice urls
-//   5) URL cleanup        : uro, urldedupe -> Parameter Collector
+//   5) URL cleanup        : uro (incl. optional urldedupe pass) -> Parameter Collector
 //   6) merge + endpoints  : JS Parameter Collector (must run AFTER Parameter
 //                           Collector, which rewrites all_params.txt), endpoints
 const RUN_ALL_ORDER = [
   { key: 'subdomains', endpoint: 'subdomains' },
-  { key: 'subfinder', endpoint: 'subfinder' },
   { key: 'dns', endpoint: 'dns' },
   { key: 'whois', endpoint: 'whois' },
   { key: 'wayback', endpoint: 'wayback' },
@@ -103,7 +102,6 @@ const RUN_ALL_ORDER = [
   { key: 'jsextract', endpoint: 'js_extractor' },
   { key: 'jsurls', endpoint: 'jsluice_urls' },
   { key: 'uro', endpoint: 'uro' },
-  { key: 'urldedupe', endpoint: 'urldedupe' },
   { key: 'allparams', endpoint: 'all_params' },
   { key: 'jsparams', endpoint: 'js_params' },
   { key: 'endpoints', endpoint: 'endpoints' },
@@ -381,7 +379,6 @@ function buildReportMarkdown(t, data) {
   let md = `# Recon Report - ${t.name}\n\n`;
   md += `**Target:** ${t.domain}\n**Generated:** ${new Date().toISOString()}\n\n---\n\n`;
   md += reportSection('Subdomain Enumeration (all-in-one)', data.subs);
-  md += reportSection('Subdomain Enumeration (subfinder)', data.subfinderSubs);
   md += reportSection('Live Host Probe (httpx)', data.liveHosts);
   md += reportSection('Live Host Status Split', data.httpxSplit);
   md += reportSection('WAF Detection (wafw00f)', data.wafRows);
@@ -398,7 +395,6 @@ function buildReportMarkdown(t, data) {
   md += reportSection('Directory / Endpoint Discovery', data.endpoints);
   md += reportSection('Wayback Machine URLs', data.waybackUrls);
   md += reportSection('URL Cleaner (uro)', data.uroUrls);
-  md += reportSection('URL Dedupe (urldedupe)', data.urldedupeUrls);
   md += reportSection('URL Pattern Filter', data.urlPatterns);
   md += reportSection('Parameter Collector (all_params)', data.paramUrls);
   md += reportSection('Tech Fingerprint + TLS', data.techLines);
@@ -541,7 +537,7 @@ async function renderMain() {
 
   setTopbar('scan ' + t.domain);
 
-  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, subfinderRes, urldedRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes, authRes] = await Promise.all([
+  const [subRes, portRes, endpRes, dnsRes, whoisRes, techRes, waybackRes, uroRes, urlPatRes, xssRes, paramsRes, httpxLiveRes, httpxFilterRes, katanaRes, jsRes, jsUrlsRes, jsSecretsRes, jsParamsRes, wafRes, wafFilterRes, cveNvdRes, cveCirclRes, cveMergeRes, authRes] = await Promise.all([
     fetch(`${API}/${t.id}/subdomains`).then(r => r.json()),
     fetch(`${API}/${t.id}/portscan`).then(r => r.json()),
     fetch(`${API}/${t.id}/endpoints`).then(r => r.json()),
@@ -552,8 +548,6 @@ async function renderMain() {
     fetch(`${API}/${t.id}/uro`).then(r => r.json()),
     fetch(`${API}/${t.id}/urlpatterns`).then(r => r.json()),
     fetch(`${API}/${t.id}/xssprobe`).then(r => r.json()),
-    fetch(`${API}/${t.id}/subfinder`).then(r => r.json()),
-    fetch(`${API}/${t.id}/urldedupe`).then(r => r.json()),
     fetch(`${API}/${t.id}/all_params`).then(r => r.json()),
     fetch(`${API}/${t.id}/httpx_live`).then(r => r.json()),
     fetch(`${API}/${t.id}/httpx_filter`).then(r => r.json()),
@@ -580,8 +574,6 @@ async function renderMain() {
   const uroUrls = uroRes.urls || [];
   const urlPatterns = urlPatRes.matches || [];
   const xssFindings = xssRes.findings || [];
-  const subfinderSubs = subfinderRes.subdomains || [];
-  const urldedupeUrls = urldedRes.urls || [];
   const paramUrls = paramsRes.urls || [];
   const liveHosts = httpxLiveRes.hosts || [];
   const httpxSplit = httpxFilterRes.summary || [];
@@ -606,7 +598,6 @@ async function renderMain() {
 
   const stats = [
     { label: 'Subdomains', value: subs.length },
-    { label: 'Subfinder', value: subfinderSubs.length },
     { label: 'Live hosts', value: liveHosts.length },
     { label: 'WAF-protected', value: wafRes.detected || 0 },
     { label: 'Crawled URLs', value: katanaUrls.length },
@@ -621,7 +612,6 @@ async function renderMain() {
     { label: 'Tech fields', value: techLines.length },
     { label: 'Wayback URLs', value: waybackUrls.length },
     { label: 'Clean URLs (uro)', value: uroUrls.length },
-    { label: 'Deduped URLs', value: urldedupeUrls.length },
     { label: 'Pattern matches', value: urlPatterns.length },
     { label: 'Param URLs', value: paramUrls.length },
     { label: 'XSS findings', value: xssFindings.length, danger: true },
@@ -640,20 +630,11 @@ async function renderMain() {
     toolCardHTML({
       key: 'subdomains',
       title: 'Subdomain Enumeration (all-in-one)',
-      description: 'Merges crt.sh, CertSpotter and HackerTarget, de-duplicated - each result is tagged with which source(s) found it. Fully passive, no traffic sent to the target.',
+      description: 'Merges crt.sh, CertSpotter, HackerTarget and (if installed) subfinder, de-duplicated - each result is tagged with which source(s) found it. Fully passive, no traffic sent to the target.',
       note: `Saved to targets/${t.id}/subdomains.txt`,
       statusText: statusFor(subRes.ran, subs.length, 'subdomains'),
       updatedAt: subRes.updated_at,
       items: subs
-    }),
-    toolCardHTML({
-      key: 'subfinder',
-      title: 'Subdomain Enumeration (subfinder)',
-      description: 'Industry-standard subfinder CLI - passive enumeration across certificate logs and other public sources. No traffic sent to the target.',
-      note: `Saved to targets/${t.id}/subfinder.txt · requires subfinder installed on this machine`,
-      statusText: statusFor(subfinderRes.ran, subfinderSubs.length, 'subdomains'),
-      updatedAt: subfinderRes.updated_at,
-      items: subfinderSubs
     }),
     toolCardHTML({
       key: 'httpxlive',
@@ -663,7 +644,7 @@ async function renderMain() {
       statusText: statusFor(httpxLiveRes.ran, liveHosts.length, 'live hosts'),
       updatedAt: httpxLiveRes.updated_at,
       items: liveHosts,
-      disabledReason: !subfinderRes.ran && !subRes.ran ? 'Run "Subfinder" or "Subdomain Enumeration" first' : null
+      disabledReason: !subRes.ran ? 'Run "Subdomain Enumeration" first' : null
     }),
     toolCardHTML({
       key: 'httpxfilter',
@@ -786,32 +767,22 @@ async function renderMain() {
     toolCardHTML({
       key: 'uro',
       title: 'URL Cleaner (uro)',
-      description: 'Drops boring static-asset URLs and collapses near-duplicate URLs (same pattern, different ID/param value) from the Wayback list. Passive, zero traffic - run Wayback Machine first.',
-      note: `Saved to targets/${t.id}/uro_urls.txt`,
+      description: 'Drops boring static-asset URLs and collapses near-duplicate URLs (same pattern, different ID/param value) from the Wayback list, then runs the industry-standard urldedupe CLI as an optional second pass if it is installed. Passive, zero traffic - run Wayback Machine first.',
+      note: `Saved to targets/${t.id}/uro_urls.txt · optional second pass if urldedupe is installed`,
       statusText: statusFor(uroRes.ran, uroUrls.length, 'URLs kept'),
       updatedAt: uroRes.updated_at,
       items: uroUrls,
       disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
     }),
     toolCardHTML({
-      key: 'urldedupe',
-      title: 'URL Dedupe (urldedupe)',
-      description: 'Industry-standard urldedupe CLI - collapses near-duplicate URLs from the Wayback list (differing only by parameter values), fast. Passive, zero traffic - run Wayback Machine first.',
-      note: `Saved to targets/${t.id}/urldedupe.txt · requires urldedupe installed on this machine`,
-      statusText: statusFor(urldedRes.ran, urldedupeUrls.length, 'URLs kept'),
-      updatedAt: urldedRes.updated_at,
-      items: urldedupeUrls,
-      disabledReason: !waybackRes.ran ? 'Run "Wayback Machine URLs" first' : null
-    }),
-    toolCardHTML({
       key: 'allparams',
       title: 'Parameter Collector',
-      description: 'Consolidates every parameterized URL (?id=1, ?page=2, ...) found across Subfinder results and the cleaned URL lists into one worklist (all_params.txt) for the active-testing phase. Passive, zero traffic.',
+      description: 'Consolidates every parameterized URL (?id=1, ?page=2, ...) found across Subdomain Enumeration results and the cleaned URL lists into one worklist (all_params.txt) for the active-testing phase. Passive, zero traffic.',
       note: `Saved to targets/${t.id}/all_params.txt`,
       statusText: statusFor(paramsRes.ran, paramUrls.length, 'parameterized URLs'),
       updatedAt: paramsRes.updated_at,
       items: paramUrls,
-      disabledReason: !subfinderRes.ran && !waybackRes.ran ? 'Run "Subfinder" or "Wayback Machine URLs" first' : null
+      disabledReason: !subRes.ran && !waybackRes.ran ? 'Run "Subdomain Enumeration" or "Wayback Machine URLs" first' : null
     }),
   ].join(''));
 
@@ -1052,19 +1023,18 @@ async function renderMain() {
 
   document.getElementById('export-report-btn').addEventListener('click', () => {
     downloadReport(t, {
-      subs, subfinderSubs, liveHosts, httpxSplit, wafRows,
+      subs, liveHosts, httpxSplit, wafRows,
       wafWith: wafFilterRes.with_waf || [], wafWithout: wafFilterRes.no_waf || [],
       katanaUrls, jsFiles,
       jsUrlsFound, jsSecretFindings, jsParamUrls,
       ports, dnsRecords, whoisLines, endpoints,
-      waybackUrls, uroUrls, urldedupeUrls, urlPatterns, paramUrls,
+      waybackUrls, uroUrls, urlPatterns, paramUrls,
       techLines, xssFindings,
       cveNvdLines, cveCirclLines, cveMergedLines
     });
   });
 
   wireToolCard('subdomains', subs, () => runTool({ key: 'subdomains', endpoint: 'subdomains', t }));
-  wireToolCard('subfinder', subfinderSubs, () => runTool({ key: 'subfinder', endpoint: 'subfinder', t }));
   wireToolCard('httpxlive', liveHosts, () => runTool({ key: 'httpxlive', endpoint: 'httpx_live', t }));
   wireToolCard('httpxfilter', httpxSplit, () => runTool({ key: 'httpxfilter', endpoint: 'httpx_filter', t }));
   wireToolCard('wafdetect', wafRows, () => runTool({ key: 'wafdetect', endpoint: 'waf', t }));
@@ -1081,7 +1051,6 @@ async function renderMain() {
   wireToolCard('techinfo', techLines, () => runTool({ key: 'techinfo', endpoint: 'techinfo', t }));
   wireToolCard('wayback', waybackUrls, () => runTool({ key: 'wayback', endpoint: 'wayback', t }));
   wireToolCard('uro', uroUrls, () => runTool({ key: 'uro', endpoint: 'uro', t }));
-  wireToolCard('urldedupe', urldedupeUrls, () => runTool({ key: 'urldedupe', endpoint: 'urldedupe', t }));
   wireToolCard('urlpatterns', urlPatterns, () => runTool({ key: 'urlpatterns', endpoint: 'urlpatterns', t }));
   wireToolCard('allparams', paramUrls, () => runTool({ key: 'allparams', endpoint: 'all_params', t }));
   wireToolCard('xssprobe', xssFindings, () => runTool({ key: 'xssprobe', endpoint: 'xssprobe', t }));

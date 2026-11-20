@@ -9,7 +9,7 @@ phase into the shared all_params.txt worklist for the next phase
                         (fetch calls, redirects, API paths)
   - katana_urls.txt   - crawler output (has its own forms/JS endpoints)
   - all_params.txt    - keeps whatever param_collector.py (the earlier
-                        subfinder+urldedupe merge) already wrote, so the
+                        Subdomain Enumeration + URL Cleaner merge) already wrote, so the
                         two collectors compose instead of clobbering
 
 Filter: only lines containing '?' (actual `?id=1`-style URLs) survive;

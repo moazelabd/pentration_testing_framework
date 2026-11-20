@@ -5,7 +5,7 @@ Merges the JavaScript file URLs discovered by two sources into one
 deduplicated js_files.txt worklist for the jsluice phase:
 
   - katana_urls.txt  - crawler output, incl. the -jc JS-crawl endpoints
-  - urldedupe.txt    - deduplicated Wayback Machine URLs (preferred)
+  - uro_urls.txt     - cleaned Wayback Machine URLs (preferred)
   - wayback.txt      - raw Wayback Machine URLs (fallback)
 
 A line qualifies if it ends in .js (including .min.js) or carries .js
@@ -27,7 +27,7 @@ _JS_MENTION = re.compile(r"\.js(?:\?[^ ]*)?$", re.IGNORECASE)
 # but every file present is merged.
 _SOURCES = [
     ("katana_urls.txt", "Web Crawler (katana)"),
-    ("urldedupe.txt", "URL Dedupe (urldedupe)"),
+    ("uro_urls.txt", "URL Cleaner (uro)"),
     ("wayback.txt", "Wayback Machine URLs"),
 ]
 

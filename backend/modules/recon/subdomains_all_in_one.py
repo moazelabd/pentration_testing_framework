@@ -1,27 +1,37 @@
 """
 Subdomain Enumeration - "all-in-one" - PASSIVE.
 
-Replaces the old crt.sh-only version. Queries 3 independent, free,
-no-API-key passive sources in parallel-ish fashion and MERGES the results,
-removing duplicates:
+Replaces the old crt.sh-only version. Queries 4 independent, free,
+no-API-key passive sources and MERGES the results, removing duplicates:
 
   - crt.sh          certificate transparency logs
   - CertSpotter      certificate transparency logs (different vantage point/
                       coverage than crt.sh - catches certs crt.sh misses)
   - HackerTarget      passive DNS / hostsearch (not cert-based at all, so it
                       can surface subdomains that never got a cert)
+  - subfinder        industry-standard CLI (github.com/projectdiscovery/
+                      subfinder) - its own mix of passive sources, merged
+                      in the same way. Optional: if subfinder isn't
+                      installed, this source is skipped with a note and
+                      the other three still run normally.
+
+This used to be split across two separate tools (this module plus a
+standalone subfinder_enum.py) that both just produced a subdomain list -
+they've been merged here into one module and one output file.
 
 No single source finds everything - that's exactly why the old single-
 source version was weak. Each result line is tagged with which source(s)
-found it. If one or two sources fail or hit their free-tier rate limit,
-the others still contribute - this only fails if ALL of them come back
-empty.
+found it. If one or more sources fail or hit their free-tier rate limit
+(or, for subfinder, aren't installed), the others still contribute - this
+only fails if ALL of them come back empty.
 """
 import os
+import subprocess
 
 import requests
 
 USER_AGENT = "recon-framework/1.0"
+SUBFINDER_TIMEOUT = 300  # seconds - passive enumeration can be slow
 
 
 def get_cached(target_path: str) -> dict:
@@ -110,11 +120,36 @@ def _from_hackertarget(domain: str):
         return found, f"hackertarget failed: {e}"
 
 
+def _from_subfinder(domain: str):
+    found = set()
+    try:
+        proc = subprocess.run(
+            ["subfinder", "-d", domain, "-silent"],
+            capture_output=True,
+            text=True,
+            timeout=SUBFINDER_TIMEOUT,
+            check=False,  # subfinder may exit non-zero on partial results
+        )
+    except FileNotFoundError:
+        return found, ("subfinder isn't installed or isn't on your PATH - skipped. Install it with "
+                       "`go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest` "
+                       "to include it next run.")
+    except subprocess.TimeoutExpired:
+        return found, f"subfinder timed out after {SUBFINDER_TIMEOUT}s and was skipped"
+
+    for line in proc.stdout.splitlines():
+        clean = line.strip().lower()
+        if clean and clean.endswith(domain):
+            found.add(clean)
+    return found, None
+
+
 def run(domain: str, target_path: str) -> dict:
     sources = {
         "crt.sh": _from_crtsh(domain),
         "certspotter": _from_certspotter(domain),
         "hackertarget": _from_hackertarget(domain),
+        "subfinder": _from_subfinder(domain),
     }
 
     merged = {}  # hostname -> set of source names that found it
