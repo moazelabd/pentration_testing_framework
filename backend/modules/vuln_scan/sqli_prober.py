@@ -24,7 +24,17 @@ import requests
 from modules import auth_ctx
 
 USER_AGENT = "recon-framework/1.0"
-PROBES = ["'", "\"", "' OR '1'='1", "1' AND '1'='2"]
+# Error-based payloads: checked against ERROR_SIGNATURES below.
+ERROR_PROBES = ["'", "\""]
+# Boolean-blind pair: these never raise a DB error, so they were previously
+# wasted requests - a TRUE condition and a FALSE condition are compared
+# against each other below instead.
+TRUE_PAYLOAD = "' OR '1'='1"
+FALSE_PAYLOAD = "' AND '1'='2"
+# A FALSE response at least this much shorter than the TRUE response (with
+# the TRUE response itself not looking like a hard error) is the classic
+# boolean-blind signal: the query silently returns fewer/no rows.
+BOOLEAN_DIFF_THRESHOLD = 0.15
 MAX_REQUESTS = 150
 
 ERROR_SIGNATURES = [
@@ -110,7 +120,7 @@ def run(domain: str, target_path: str) -> dict:
 
             matched_db = None
             matched_url = None
-            for probe in PROBES:
+            for probe in ERROR_PROBES:
                 if tested >= MAX_REQUESTS:
                     break
                 probe_url = _build_probe_url(url, param, params, probe)
@@ -127,6 +137,29 @@ def run(domain: str, target_path: str) -> dict:
 
             if matched_db:
                 findings.append(f"POSSIBLE SQLi ({matched_db})\tparam={param}\t{matched_url}")
+                continue
+
+            # No error signature - try the boolean-blind pair instead of
+            # discarding these two requests (they never raise a DB error,
+            # so the error-signature check alone could never catch them).
+            if tested + 2 > MAX_REQUESTS:
+                continue
+            true_url = _build_probe_url(url, param, params, TRUE_PAYLOAD)
+            false_url = _build_probe_url(url, param, params, FALSE_PAYLOAD)
+            tested += 2
+            try:
+                true_resp = session.get(true_url, timeout=8, allow_redirects=True)
+                false_resp = session.get(false_url, timeout=8, allow_redirects=True)
+            except requests.exceptions.RequestException:
+                continue
+            if _match_signature(true_resp.text) or _match_signature(false_resp.text):
+                continue  # already covered by the error-based path above
+            true_len, false_len = len(true_resp.text), len(false_resp.text)
+            if true_len == 0:
+                continue
+            relative_diff = abs(true_len - false_len) / true_len
+            if true_resp.status_code == false_resp.status_code and relative_diff >= BOOLEAN_DIFF_THRESHOLD:
+                findings.append(f"POSSIBLE SQLi (boolean-blind)\tparam={param}\t{true_url}")
 
     with open(os.path.join(target_path, "sqli_probe.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(findings))

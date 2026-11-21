@@ -31,7 +31,10 @@ def run(domain: str, target_path: str) -> dict:
         # -Pn skips nmap's host-discovery ping. Without it, a target that
         # blocks ICMP (very common) gets reported as "down" even though
         # its TCP ports are reachable.
-        scanner.scan(domain, arguments="-T4 -F -Pn")
+        # timeout caps how long the underlying nmap subprocess may run - without
+        # it a slow/filtered target can hang this request (and the worker
+        # serving it) indefinitely.
+        scanner.scan(domain, arguments="-T4 -F -Pn", timeout=120)
     except nmap.PortScannerError as e:
         return {
             "error": "nmap isn't installed, isn't on your system PATH, or the scan "

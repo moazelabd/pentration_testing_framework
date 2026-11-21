@@ -88,7 +88,12 @@ def list_targets() -> list:
         meta_path = os.path.join(target_path, "meta.json")
         if not os.path.isfile(meta_path):
             continue
-        meta = read_meta(target_path)
+        try:
+            meta = read_meta(target_path)
+        except (json.JSONDecodeError, OSError):
+            # A corrupted/partially-written meta.json for one target must not
+            # take down the whole /api/targets listing for every other target.
+            continue
         meta["id"] = folder
         meta["subdomain_count"] = count_lines(os.path.join(target_path, "subdomains.txt"))
         # Powers the sidebar's warning badge - counts confirmed-unescaped

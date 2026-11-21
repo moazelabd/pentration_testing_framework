@@ -283,7 +283,7 @@ function toolCardHTML({ key, title, description, note, statusText, items, disabl
         </div>
         <div id="results-wrap-${key}" style="${items.length > 0 ? '' : 'display:none;'}">
           ${showSearch ? `<input type="text" class="result-search" id="search-${key}" placeholder="Filter ${items.length} results...">` : ''}
-          <div class="result-list" id="results-${key}">${items.map(s => `<div class="${severityClass(s)}">${s}</div>`).join('')}</div>
+          <div class="result-list" id="results-${key}">${items.map(s => `<div class="${severityClass(s)}">${escapeHtml(s)}</div>`).join('')}</div>
           <div class="tool-actions">
             <button class="ghost-btn" id="copy-${key}">Copy all</button>
           </div>
@@ -1088,8 +1088,8 @@ async function renderMain() {
       <div class="target-header-top">
         <div>
           <div class="t-label">TARGET</div>
-          <h2>${t.name}</h2>
-          <div class="t-url">${t.domain}</div>
+          <h2>${escapeHtml(t.name)}</h2>
+          <div class="t-url">${escapeHtml(t.domain)}</div>
         </div>
         <button id="export-report-btn" class="ghost-btn export-report-btn">Export Report</button>
       </div>

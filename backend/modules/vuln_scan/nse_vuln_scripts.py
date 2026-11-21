@@ -60,7 +60,9 @@ def run(domain: str, target_path: str) -> dict:
         # Same PortScannerError-inside-try precaution as portscan.py - a
         # missing nmap binary must not crash the whole Flask request.
         scanner = nmap.PortScanner()
-        scanner.scan(domain, ports=",".join(ports), arguments="-Pn --script vuln")
+        # timeout caps the nmap subprocess - vuln scripts can otherwise run for a
+        # very long time against a slow/filtered target, hanging this request.
+        scanner.scan(domain, ports=",".join(ports), arguments="-Pn --script vuln", timeout=180)
     except nmap.PortScannerError as e:
         return {
             "error": "nmap isn't installed, isn't on your system PATH, or the scan "
