@@ -227,8 +227,14 @@ Results save to `backend/targets/<target-id>/*.txt`, one file per tool.
 ```bash
 cd backend
 source venv/bin/activate
-pytest
+python -m pytest
 ```
+
+Use `python -m pytest`, not a bare `pytest` - if another `pytest` is already
+installed system-wide (common on Kali), a bare `pytest` can run *that* one
+instead of the venv's, and then fail with `ModuleNotFoundError` for packages
+that are clearly installed (`pip show` says so) because it's looking in the
+wrong environment entirely. `python -m pytest` always uses the active venv.
 
 Covers the parts most worth regression-testing: the SQLi error-based and
 boolean-blind detection logic, the nmap timeout/error handling, the
