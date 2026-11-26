@@ -14,7 +14,7 @@ Then open http://localhost:5000 in your browser.
 
 import os
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 import storage
@@ -30,6 +30,7 @@ from modules.recon import (
 )
 from modules import auth_ctx
 from modules.ai_analysis import ai_findings
+from modules.reporting import report_builder
 from modules.vuln_scan import (
     cve_circl, cve_merge, cve_nvd, jsluice_secrets, lfi_prober, nse_vuln_scripts,
     open_redirect_prober, sqli_prober, subdomain_takeover, tls_checks,
@@ -906,6 +907,26 @@ def run_ai_report_route(target_id):
         return jsonify({"error": "not found"}), 404
     domain = storage.read_meta(target_path)["domain"]
     return module_result(ai_findings.run(domain, target_path))
+
+
+# ---------- PDF report export ----------
+
+@app.route("/api/targets/<target_id>/report.pdf", methods=["GET"])
+def export_report_pdf(target_id):
+    target_path = resolve_target(target_id)
+    if not target_path:
+        return jsonify({"error": "not found"}), 404
+    meta = storage.read_meta(target_path)
+    try:
+        pdf_bytes = report_builder.build_pdf(meta, target_path)
+    except Exception as e:
+        return jsonify({"error": f"Could not build the PDF report: {e}"}), 500
+    filename = f"{target_id}-pentest-report.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 if __name__ == "__main__":

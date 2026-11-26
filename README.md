@@ -199,6 +199,7 @@ fully built out.
 | GET/POST | `/api/targets/<id>/webmisconfig` | Web Misconfiguration Checker |
 | GET/POST | `/api/targets/<id>/nsevuln` | Nmap Vuln Scripts |
 | GET/POST | `/api/targets/<id>/subtakeover` | Subdomain Takeover Checker |
+| GET | `/api/targets/<id>/report.pdf` | Export - builds a clean PDF report from whatever results already exist for the target |
 
 GET returns the last saved result (`{"ran": false}` if never run). POST
 runs the tool fresh and overwrites the saved result.

@@ -403,57 +403,22 @@ async function runAll(t, order = RUN_ALL_ORDER, btnId = 'run-all-btn', statusId 
   renderMain();
 }
 
-function reportSection(title, items) {
-  const body = items.length
-    ? items.map(i => `- ${i}`).join('\n')
-    : '_Not run, or no results yet._';
-  return `## ${title}\n\n${body}\n\n`;
-}
-
-function buildReportMarkdown(t, data) {
-  let md = `# Recon Report - ${t.name}\n\n`;
-  md += `**Target:** ${t.domain}\n**Generated:** ${new Date().toISOString()}\n\n---\n\n`;
-  md += reportSection('Subdomain Enumeration (all-in-one)', data.subs);
-  md += reportSection('Live Host Probe (httpx)', data.liveHosts);
-  md += reportSection('Live Host Status Split', data.httpxSplit);
-  md += reportSection('WAF Detection (wafw00f)', data.wafRows);
-  md += reportSection('WAF Split - WAF-protected', data.wafWith);
-  md += reportSection('WAF Split - No WAF', data.wafWithout);
-  md += reportSection('Web Crawl (katana)', data.katanaUrls);
-  md += reportSection('JS Files Extracted', data.jsFiles);
-  md += reportSection('JS URLs (jsluice)', data.jsUrlsFound);
-  md += reportSection('JS Secrets (jsluice)', data.jsSecretFindings);
-  md += reportSection('JS Parameter Worklist (all_params)', data.jsParamUrls);
-  md += reportSection('Port Scan (nmap)', data.ports);
-  md += reportSection('DNS Records', data.dnsRecords);
-  md += reportSection('WHOIS / RDAP Lookup', data.whoisLines);
-  md += reportSection('Directory / Endpoint Discovery', data.endpoints);
-  md += reportSection('Wayback Machine URLs', data.waybackUrls);
-  md += reportSection('URL Cleaner (uro)', data.uroUrls);
-  md += reportSection('URL Pattern Filter', data.urlPatterns);
-  md += reportSection('Parameter Collector (all_params)', data.paramUrls);
-  md += reportSection('Tech Fingerprint + TLS', data.techLines);
-  md += reportSection('XSS Reflection Prober (dalfox-inspired)', data.xssFindings);
-  md += reportSection('Open Redirect Prober', data.openRedirFindings);
-  md += reportSection('SQL Injection Error-Based Prober', data.sqliFindings);
-  md += reportSection('LFI / Path Traversal Prober', data.lfiFindings);
-  md += reportSection('TLS / SSL Deep Checks', data.tlsFindings);
-  md += reportSection('Web Misconfiguration Checker', data.webMiscFindings);
-  md += reportSection('Nmap Vuln Scripts', data.nseVulnFindings);
-  md += reportSection('Subdomain Takeover Checker', data.subTakeoverFindings);
-  md += reportSection('CVEs - merged (NVD + CIRCL)', data.cveMergedLines);
-  md += reportSection('CVE Lookup (NVD)', data.cveNvdLines);
-  md += reportSection('CVE Lookup (CIRCL)', data.cveCirclLines);
-  return md;
-}
-
-function downloadReport(t, data) {
-  const md = buildReportMarkdown(t, data);
-  const blob = new Blob([md], { type: 'text/markdown' });
+async function downloadReportPdf(t) {
+  // The PDF itself is built server-side (backend/modules/reporting/report_builder.py)
+  // from whatever result files already exist for this target - nothing is
+  // re-assembled from in-memory frontend state, so it always matches what's
+  // actually on disk, including the AI Analysis report if one has been run.
+  const res = await fetch(`${API}/${t.id}/report.pdf`);
+  if (!res.ok) {
+    let msg = `Server returned ${res.status}`;
+    try { msg = (await res.json()).error || msg; } catch (_) { /* not JSON */ }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${t.id}-recon-report.md`;
+  a.download = `${t.id}-pentest-report.pdf`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -1242,18 +1207,19 @@ async function renderMain() {
     });
   }
 
-  document.getElementById('export-report-btn').addEventListener('click', () => {
-    downloadReport(t, {
-      subs, liveHosts, httpxSplit, wafRows,
-      wafWith: wafFilterRes.with_waf || [], wafWithout: wafFilterRes.no_waf || [],
-      katanaUrls, jsFiles,
-      jsUrlsFound, jsSecretFindings, jsParamUrls,
-      ports, dnsRecords, whoisLines, endpoints,
-      waybackUrls, uroUrls, urlPatterns, paramUrls,
-      techLines, xssFindings, openRedirFindings, sqliFindings, lfiFindings,
-      tlsFindings, webMiscFindings, nseVulnFindings, subTakeoverFindings,
-      cveNvdLines, cveCirclLines, cveMergedLines
-    });
+  document.getElementById('export-report-btn').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Building PDF...';
+    try {
+      await downloadReportPdf(t);
+    } catch (err) {
+      alert('Could not build the report PDF. Check the backend is running and try again.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
   });
 
   wireToolCard('subdomains', subs, () => runTool({ key: 'subdomains', endpoint: 'subdomains', t }));
