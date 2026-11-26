@@ -29,3 +29,6 @@ SQLAlchemy>=2.0.35
 # --- Task Queue & Background Jobs ---
 celery>=5.4.0
 redis>=5.1.1
+
+# --- Tests (dev only - not needed to run the app, only to run `pytest`) ---
+pytest>=8.3.3

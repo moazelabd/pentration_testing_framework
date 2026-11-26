@@ -222,10 +222,21 @@ re-run the `which` check.
 
 Results save to `backend/targets/<target-id>/*.txt`, one file per tool.
 
-## What's next
+## Tests
 
-The **Monitoring** button is still just a placeholder for now. Recon and Vulnerability Scan are both
-fully built out.
+```bash
+cd backend
+source venv/bin/activate
+pytest
+```
+
+Covers the parts most worth regression-testing: the SQLi error-based and
+boolean-blind detection logic, the nmap timeout/error handling, the
+corrupted-`meta.json` crash guard, the URL cleaner's static-asset/duplicate
+filtering and its graceful fallback when `urldedupe` isn't installed, and
+the PDF report builder (empty target, tool results, AI report). Everything
+is mocked at the network/subprocess boundary, so running the suite never
+touches a real target, nmap, or the network.
 
 ## Adding a new tool
 
