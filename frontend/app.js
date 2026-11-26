@@ -364,10 +364,11 @@ async function runTool({ key, endpoint, method, resultKey, t, onDone }) {
 }
 
 async function runAll(t, order = RUN_ALL_ORDER, btnId = 'run-all-btn', statusId = 'run-all-status', sectionKey = 'recon') {
-  const btn = document.getElementById(btnId);
-  const statusEl = document.getElementById(statusId);
+  let btn = document.getElementById(btnId);
+  let statusEl = document.getElementById(statusId);
   if (!btn || !statusEl) return;
   btn.disabled = true;
+  uiState.sections[sectionKey] = true;
   const failures = [];
 
   for (let i = 0; i < order.length; i++) {
@@ -375,6 +376,19 @@ async function runAll(t, order = RUN_ALL_ORDER, btnId = 'run-all-btn', statusId 
     statusEl.textContent = `Running ${step.key}... (${i + 1}/${order.length})`;
     runningKeys.add(step.key);
     markRunning();
+
+    // Mirror runTool()'s own "running" visuals on this tool's card (spinner
+    // dot + glowing border) so Run All looks the same step by step as
+    // clicking Run on each tool by hand, instead of only updating silently
+    // in the background.
+    const cardStatusEl = document.getElementById(`status-${step.key}`);
+    const cardBtn = document.getElementById(`run-${step.key}`);
+    if (cardStatusEl) {
+      cardStatusEl.className = 'tool-status running';
+      cardStatusEl.textContent = 'Running... this can take a little while.';
+    }
+    if (cardBtn) cardBtn.disabled = true;
+
     logActivity(`${step.key} started (${i + 1}/${order.length})`, 'a-info');
     try {
       const res = await fetch(`${API}/${t.id}/${step.endpoint}`, { method: 'POST' });
@@ -393,14 +407,24 @@ async function runAll(t, order = RUN_ALL_ORDER, btnId = 'run-all-btn', statusId 
       runningKeys.delete(step.key);
       markRunning();
     }
+
+    // Re-render right now, after this one tool finished, so its card shows
+    // its own result immediately - same as a manual Run - instead of
+    // everything staying blank until the whole batch ends. renderMain()
+    // rebuilds the page's DOM from scratch, so re-grab the Run All
+    // button/status line afterwards (the old references are now detached).
+    await renderMain();
+    btn = document.getElementById(btnId);
+    statusEl = document.getElementById(statusId);
+    if (btn) btn.disabled = true;
   }
 
-  statusEl.textContent = failures.length
-    ? `Done, with ${failures.length} issue(s) - ${failures.join(' | ')}`
-    : 'All tools finished.';
-  btn.disabled = false;
-  uiState.sections[sectionKey] = true;
-  renderMain();
+  if (statusEl) {
+    statusEl.textContent = failures.length
+      ? `Done, with ${failures.length} issue(s) - ${failures.join(' | ')}`
+      : 'All tools finished.';
+  }
+  if (btn) btn.disabled = false;
 }
 
 async function downloadReportPdf(t) {
