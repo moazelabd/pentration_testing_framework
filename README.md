@@ -27,14 +27,50 @@ capstone_prj/
 
 `TOOLS_USED.txt` lists every external tool/API each module calls.
 
-## Running it
+## Running it (fresh machine, zero prior setup)
+
+These steps assume nothing is installed yet. Follow them top to bottom, in
+order, and the app will run with every tool working - no extra debugging.
+
+### 1. System packages (Linux / Kali / Debian / Ubuntu)
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip nmap golang-go git
+```
+
+- `python3-venv` / `python3-pip` - needed to create the virtualenv below.
+- `nmap` - used directly by the Port Scan and Nmap Vuln Scripts tools.
+- `golang-go` - needed only to install the 5 Go-based tools in step 3. If
+  `apt`'s Go is older than 1.21, install a newer one from
+  [go.dev/dl](https://go.dev/dl/) instead - any method works, `go install`
+  just needs to exist.
+- macOS: `brew install python nmap go git`. Windows: install
+  [Python](https://www.python.org/downloads/), [Nmap](https://nmap.org/download.html)
+  and [Go](https://go.dev/dl/) from their installers, then use `py` instead
+  of `python3`/`python` below.
+
+### 2. Python environment
 
 ```bash
 cd capstone_prj/backend
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-python app.py
+```
+
+On Kali/Debian you may see `error: externally-managed-environment` if you
+skip the venv - always activate `venv` first, don't `pip install` system-wide.
+
+### 3. External CLI tools (required for the industry-standard modules)
+
+See the **External CLI tools** section right below - do that now, then come
+back here.
+
+### 4. Run it
+
+```bash
+python app.py        # still inside backend/, with venv activated
 ```
 
 Open `http://localhost:5000`. On Windows, if `python`/`pip` aren't
@@ -90,10 +126,14 @@ git) and is sent **only to the target's own domain and subdomains** - never to c
 site, and it is dropped if a redirect leaves the domain. Used by: Live Host Probe, Katana, Tech Fingerprint,
 Endpoint Discovery and the XSS Reflection Prober. Session cookies expire - paste a fresh one if results stop.
 
-## External CLI tools (optional but recommended)
+## External CLI tools (recommended - several Recon tools need these)
 
-The new industry-standard modules need these binaries on your PATH.
-Most are Go tools; **wafw00f is a pip package**:
+Every tool below is optional in the sense that a missing one just shows an
+error on its own card and the rest of the pipeline keeps working - but for
+the full framework to work out of the box, install all of them now.
+
+**Most are Go tools; wafw00f is a pip package; nmap is a system package**
+(already installed in step 1 above if you followed it):
 
 ```bash
 go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
@@ -101,12 +141,48 @@ go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install -v github.com/projectdiscovery/katana/cmd/katana@latest
 go install github.com/BishopFox/jsluice/cmd/jsluice@latest
 go install -v github.com/ameenmaali/urldedupe@latest
-pip install wafw00f
+pip install wafw00f        # inside the same activated venv as step 2
 ```
 
-nmap stays a separate package install (`apt install nmap`). If a CLI tool
-is missing, its card shows an error message with the install command -
-the rest of the pipeline keeps working.
+### ⚠️ The #1 reason these "don't work" after installing: PATH
+
+`go install` puts every binary in `$HOME/go/bin` (or `$GOBIN` if you've set
+that), **not** in a folder your shell already searches. If you skip this
+step, `subfinder`/`katana`/etc. will say `command not found` even though
+the install above printed no error.
+
+Add Go's bin folder to your PATH, then make it permanent:
+
+```bash
+export PATH=$PATH:$HOME/go/bin
+
+# make it permanent (pick the line matching your shell):
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc     # bash (default on most Linux/Kali)
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc       # zsh (default on macOS)
+
+# then reload the current terminal:
+source ~/.bashrc   # or source ~/.zshrc
+```
+
+### Verify every tool is actually reachable
+
+Run this after the PATH step above - every line must print a path, not
+"not found":
+
+```bash
+which subfinder httpx katana jsluice urldedupe wafw00f nmap
+```
+
+If one is still missing: re-run its `go install`/`pip install` command,
+open a **new terminal** (PATH changes only apply to new shells), then
+re-run the `which` check.
+
+> `httpx` name clash: this project's `requirements.txt` deliberately never
+> installs the Python `httpx` pip package - only ProjectDiscovery's Go
+> `httpx` binary. If `which httpx` ever points at a Python package instead
+> of `$HOME/go/bin/httpx`, something installed the wrong one; uninstall the
+> pip package (`pip uninstall httpx`) and make sure `$HOME/go/bin` comes
+> first on your PATH.
 
 ## Tools
 
