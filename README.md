@@ -222,6 +222,8 @@ re-run the `which` check.
 
 Results save to `backend/targets/<target-id>/*.txt`, one file per tool.
 
+Just the tool names, no descriptions: **[TOOLS.md](TOOLS.md)**.
+
 ## Tests
 
 ```bash
